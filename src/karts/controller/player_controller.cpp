@@ -49,7 +49,7 @@
 #include <chrono>  // for std::chrono::seconds
 #include <thread>  // for std::this_thread::sleep_for
 using namespace std;
-
+static float jump_limit = 70;
 PlayerController::PlayerController(AbstractKart *kart)
     : Controller(kart), jump_value1(8.0),
       jump_value2(8.0),
@@ -63,8 +63,8 @@ PlayerController::PlayerController(AbstractKart *kart)
       jump_karty_threshold(3.0),
       jump_ball_height_min(2.0),
       jump_ball_height_max(20.0),
-      jump_ball_vel_min(10.0),
-      jump_limit(70)
+      jump_ball_vel_min(10.0)
+      //jump_limit(70)
 {
     m_penalty_ticks = 0;
 }   // PlayerController
@@ -99,6 +99,10 @@ void read_values(std::string filename, std::initializer_list<float*> store_targe
         file << documentation;
     }
     file.close();
+}
+void set_jump_limit(float value)
+{
+    jump_limit = value;
 }
 
 //-----------------------------------------------------------------------------
