@@ -47,7 +47,7 @@
 using namespace std;
 
 PowerupManager* powerup_manager=0;
-static unsigned int powerup_multiplier = 3;
+unsigned int powerup_multiplier = 3;
 //-----------------------------------------------------------------------------
 /** The constructor initialises everything to zero. */
 PowerupManager::PowerupManager()
@@ -629,6 +629,7 @@ PowerupManager::PowerupType PowerupManager::getRandomPowerup(unsigned int pos,
                                                              uint64_t random_number, bool win)
 {
     SoccerWorld* sw = (SoccerWorld*)World::getWorld();
+    int powerup_multiplier_value = 1;
     int powerup = m_current_item_weights.getRandomItem(pos-1, random_number);
     if(powerup > POWERUP_LAST)
     {
@@ -638,12 +639,12 @@ PowerupManager::PowerupType PowerupManager::getRandomPowerup(unsigned int pos,
     else{
         if(!win){
 
-            const int red_score = sw->getScore(KART_TEAM_RED);
-            const int blue_score = sw->getScore(KART_TEAM_BLUE);
+            int red_score = sw->getScore(KART_TEAM_RED);
+            int blue_score = sw->getScore(KART_TEAM_BLUE);
             int diff = abs(red_score-blue_score);
             if (diff > 4) diff =4;
-            if (powerup_multiplier == 3) powerup_multiplier = diff+1;
-            *n=powerup_multiplier;
+            if (powerup_multiplier == 3) powerup_multiplier_value = diff+1;
+            *n=powerup_multiplier_value;
         }
 
         else *n=1;
