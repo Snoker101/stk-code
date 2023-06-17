@@ -125,6 +125,12 @@ private:
      */
     std::map<std::string, std::vector<WeightsData*> > m_all_weights;
 
+     /**
+     * The multiplier for the powerups when the team of the player is losing
+     */
+
+
+
 public:
     // The anvil and parachute must be at the end of the enum, and the
     // zipper just before them (see Powerup::hitBonusBox).
@@ -184,7 +190,7 @@ public:
     void setRandomSeed(uint64_t seed) { m_random_seed.store(seed); }
 
 };   // class PowerupManager
-
+void set_powerup_multiplier(unsigned int value);
 extern PowerupManager* powerup_manager;
 
 #endif
