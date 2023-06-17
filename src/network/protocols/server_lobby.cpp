@@ -59,6 +59,7 @@
 #include "utils/time.hpp"
 #include "utils/translation.hpp"
 
+#include "modes/soccer_world.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -73,32 +74,31 @@
 
   // List of joining messages
 const std::vector<std::string> JOINED_MESSAGES = {
-    "Welcome to the party!",
-    "Glad you could make it!",
-    "Time to show off your skills!",
-    "The more the merrier!",
-    "Let's get this party started!",
-    "Buckle up, it's gonna be a wild ride!",
-    "Welcome aboard!",
-    "You're just in time!",
-    "The party don't start till you walk in!",
-    "Glad you're here!",
-    "We've been waiting for you!",
-    "It's about to go down!",
-    "Good to see you!",
-    "Get ready to rock and roll!",
-    "Hope you brought your A-game!",
-    "Just what we needed!",
-    "We were starting to get lonely!",
-    "Joining the fray!",
-    "Let's get this show on the road!",
-    "We're gonna have a blast!"
+    "Welcome aboard, keyboard lord!",
+    "Ahoy there, gaming bear!",
+    "Join the fun, little bun!",
+    "Enter the arena, brave hyena!",
+    "Glad you're here, gaming deer!",
+    "Welcome to the crew, kangaroo!",
+    "Join the fray, gaming jay!",
+    "Let's roll, gaming mole!",
+    "Game on, marathon python!",
+    "Welcome to the game zone, sly raccoon!",
+    "Into the spotlight, gaming knight!",
+    "Gaming feast, mighty beast!",
+    "Join the gaming spree, bumblebee!",
+    "Welcome to the club, gaming cub!",
+    "Into the gaming lair, dashing hare!",
+    "Welcome to the team, gaming dream!",
+    "Make some waves, gaming braves!",
+    "Welcome, controller conqueror!",
+    "Get this party started, gaming-hearted!"
 };
 
 const std::vector<std::string> LEFT_MESSAGES = {
     "Later gator!",
     "Peace out!",
-    "See you soon, you big baboon!",
+    "See you soon, big baboon!",
     "So long, King Kong!",
     "See you later, alligator!",
     "Time to fly, goodbye!",
@@ -108,7 +108,7 @@ const std::vector<std::string> LEFT_MESSAGES = {
     "Adios, amigos!",
     "After a while, crocodile!",
     "See ya soon, raccoon!",
-    "Gotta be flyin, dandelion!",
+    "Gotta be flyin, dandelion!",
     "Time to go, buffalo!",
     "Take care, teddy bear!",
     "Cant stay, blue jay!",
@@ -127,10 +127,11 @@ const std::vector<std::string> LEFT_MESSAGES = {
     "Time to bail, slimy snail!",
     "Must be off, little moth!",
     "Gotta kick it, little cricket!",
-    "Time to sail, orca whale!",
+    "Time to sail, orca whale \U0001f433",
     "Gotta scoot, lil' newt!",
     "Bye for now, brown cow!",
-    "Gotta run, honey bun!"
+    "Gotta run, honey bun!",
+    "Till next time, gaming chime!"
 
 };
 // Function to generate a random message
@@ -141,6 +142,45 @@ std::string generateRandomMessage(const std::vector<std::string> Messages) {
 }
 std::string lastJoinedName;
 std::string lastLeftName;
+
+std::vector<std::string> powerupper_on, powerupper_off, jump_on, jump_off;
+bool powerupper_mode_on() {
+    std::ifstream file("powerupper.txt");
+    float a, b;
+    file >> a >> b;
+    return !(a == 1 && b == 0);
+}
+
+bool jump_mode_on() {
+    std::ifstream file("jumplimit.txt");
+    float a;
+    file >> a;
+    return !(a == 0);
+}
+
+void removeName(std::string playerName){
+    // Check if the player exists in the vector powerupper_on
+    auto it1 = std::find(powerupper_on.begin(), powerupper_on.end(), playerName);
+    if (it1 != powerupper_on.end())
+    // If the string exists, remove it from the vector
+        powerupper_on.erase(it1);
+
+    auto it2 = std::find(powerupper_off.begin(), powerupper_off.end(), playerName);
+    if (it2 != powerupper_off.end())
+        powerupper_off.erase(it2);
+
+    auto it3 = std::find(jump_off.begin(), jump_off.end(), playerName);
+    if (it3 != jump_off.end())
+        jump_off.erase(it3);
+
+    auto it4 = std::find(jump_on.begin(), jump_on.end(), playerName);
+    if (it4 != jump_on.end())
+        jump_on.erase(it4);
+
+
+
+    return;
+}
 
 int ServerLobby::m_fixed_laps = -1;
 unsigned int playerlimit = 10;
@@ -782,6 +822,36 @@ void ServerLobby::updateTracksForMode()
     }
     lastJoinedName = "";
     lastLeftName = "";
+
+    if (!powerupper_mode_on())
+                {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "\u26A0\uFE0F Powerupper mode is off. Vote \"/powerupper on\" to turn it on.";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                auto peers = STKHost::get()->getPeers();
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+                delete chat;
+
+                }
+
+    if (!jump_mode_on())
+    {
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "\u26A0\uFE0F Jump mode is off. Vote \"/jump on\" to turn it on.";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        auto peers = STKHost::get()->getPeers();
+        for (auto& p : peers) {
+            p->sendPacket(chat, true /* reliable */);
+        }
+        delete chat;
+    }
+
 }   // updateTracksForMode
 
 //-----------------------------------------------------------------------------
@@ -952,7 +1022,6 @@ void ServerLobby::handleChat(Event* event)
         delete chat;
     }
 }   // handleChat
-
 //-----------------------------------------------------------------------------
 void ServerLobby::changeTeam(Event* event)
 {
@@ -3441,27 +3510,117 @@ void ServerLobby::clientDisconnected(Event* event)
     updatePlayerList();
     delete msg;
 
+            for (auto p : players_on_peer)
+    {
+std::string peerName = StringUtils::wideToUtf8(p->getName());
+if (peerName != lastLeftName) {
 NetworkString* chat = getNetworkString();
             chat->addUInt8(LE_CHAT);
             chat->setSynchronous(true);
-            for (auto p : players_on_peer)
-    {
-            std::string peerName = StringUtils::wideToUtf8(p->getName());
-
-            if (peerName != lastLeftName) {
-            std::string msg = "" + peerName + " disconnected! "+generateRandomMessage(LEFT_MESSAGES);
+            std::string msg = "\U0001f6eb " + peerName + " disconnected! "+generateRandomMessage(LEFT_MESSAGES);
             chat->encodeString16(StringUtils::utf8ToWide(msg));
 
             // Update lastLeftName
             lastLeftName = peerName;
-    }
-    }
+
             auto peers = STKHost::get()->getPeers();
             for (auto& p : peers) {
                 p->sendPacket(chat, true /* reliable */);
             }
             delete chat;
+}
+            removeName(peerName); //remove peer votings
 
+            //update voting result
+            auto peers = STKHost::get()->getPeers();
+            if (powerupper_on.size() > peers.size()/2)
+            {
+
+                    std::ofstream outfile("powerupper.txt");
+                    outfile << "3 20\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)";
+                    outfile.close();
+                    NetworkString* chat = getNetworkString();
+                    chat->addUInt8(LE_CHAT);
+                    chat->setSynchronous(true);
+                    std::string msg = std::to_string(powerupper_on.size())+"/"+std::to_string(peers.size())+" votes for /powerupper on\nPowerupper mode enabled \U0001f7e2";
+                    chat->encodeString16(StringUtils::utf8ToWide(msg));
+                for (auto& p : peers) {
+                    p->sendPacket(chat, true /* reliable */);
+                }
+                    delete chat;
+                    powerupper_off.clear();
+                    powerupper_on.clear();
+                    }
+            else if (powerupper_off.size() > peers.size()/2)
+            {
+
+                std::ofstream outfile("powerupper.txt");
+                outfile << "1 0\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)";
+                outfile.close();
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = std::to_string(powerupper_off.size())+"/"+std::to_string(peers.size())+" votes for /powerupper off\nPowerupper mode disabled \U0001f534";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+                delete chat;
+                powerupper_off.clear();
+                powerupper_on.clear();
+
+                }
+
+                 if (jump_on.size() > peers.size()/2)
+            {
+
+                    std::ofstream outfile("jumplimit.txt");
+                    outfile << "70\nThis value represents the maximum jump height the kart can reach before further jumping is disabled";
+                    outfile.close();
+                    NetworkString* chat = getNetworkString();
+                    chat->addUInt8(LE_CHAT);
+                    chat->setSynchronous(true);
+                    std::string msg = std::to_string(jump_on.size())+"/"+std::to_string(peers.size())+" votes for /jump on\nJump mode enabled \U0001f7e2";
+                    chat->encodeString16(StringUtils::utf8ToWide(msg));
+                for (auto& p : peers) {
+                    p->sendPacket(chat, true /* reliable */);
+                }
+                    delete chat;
+                    jump_off.clear();
+                    jump_on.clear();
+                    }
+            else if (jump_off.size() > peers.size()/2)
+            {
+
+                std::ofstream outfile("jumplimit.txt");
+                outfile << "0\nThis value represents the maximum jump height the kart can reach before further jumping is disabled";
+                outfile.close();
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = std::to_string(jump_off.size())+"/"+std::to_string(peers.size())+" votes for /jump off\nJump mode disabled \U0001f534";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+                delete chat;
+                jump_off.clear();
+                jump_on.clear();
+
+                }
+
+
+            if (peers.size() < 1) //turn on powerupper mode and jump mode if everyone left
+            {
+                 std::ofstream outfile("powerupper.txt");
+                    outfile << "3 20\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)";
+                    outfile.close();
+
+                   std::ofstream outfile2("jumplimit.txt");
+                    outfile2 << "70\nThis value represents the maximum jump height the kart can reach before further jumping is disabled";
+                    outfile2.close();
+            }
+    }
     writeDisconnectInfoTable(event->getPeer());
 }   // clientDisconnected
 
@@ -4146,6 +4305,9 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
     for (auto profile : all_profiles)
     {
         auto profile_name = profile->getName();
+         // Add a Cedar tree emoji if the player's name is "Cedar"
+        if (profile_name == L"Cedar")
+            profile_name += irr::core::stringw(L" ") + StringUtils::utf32ToWide({ 0x0001F1F1, 0x0001F1E7 });
 
         // get OS information
         auto version_os = StringUtils::extractVersionOS(profile->getPeer()->getUserVersion());
@@ -4673,6 +4835,8 @@ bool ServerLobby::decryptConnectionRequest(std::shared_ptr<STKPeer> peer,
     uint32_t online_id, const core::stringw& online_name,
     const std::string& country_code)
 {
+	SoccerWorld* sw = (SoccerWorld*)World::getWorld();
+
     auto crypto = std::unique_ptr<Crypto>(new Crypto(
         Crypto::decode64(key), Crypto::decode64(iv)));
     if (crypto->decryptConnectionRequest(data))
@@ -4688,7 +4852,7 @@ bool ServerLobby::decryptConnectionRequest(std::shared_ptr<STKPeer> peer,
                 NetworkString* chat = getNetworkString();
                 chat->addUInt8(LE_CHAT);
                 chat->setSynchronous(true);
-                std::string msg = "" + peerName + " is here! "+generateRandomMessage(JOINED_MESSAGES);
+                std::string msg = "\U0001f6ec " + peerName + " is here! "+generateRandomMessage(JOINED_MESSAGES);
                 chat->encodeString16(StringUtils::utf8ToWide(msg));
                 auto peers = STKHost::get()->getPeers();
                 for (auto& p : peers) {
@@ -4701,6 +4865,41 @@ bool ServerLobby::decryptConnectionRequest(std::shared_ptr<STKPeer> peer,
                 lastJoinedName = peerName;
             }
 
+        if (m_state.load() == RACING){
+        const int red_score = sw->getScore(KART_TEAM_RED);
+        const int blue_score = sw->getScore(KART_TEAM_BLUE);
+	std::string msg = "\nScore:\n\U0001f7e5 Red " + std::to_string(red_score)+ " : " + std::to_string(blue_score) + " Blue \U0001f7e6\n";
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+	chat->encodeString16(StringUtils::utf8ToWide(msg));
+        peer->sendPacket(chat, true/*reliable*/);
+        delete chat;
+
+    }
+    if (!powerupper_mode_on())
+                {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "\u26A0\uFE0F Powerupper mode is off. Vote \"/powerupper on\" to turn it on.";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                peer->sendPacket(chat, true /* reliable */);
+                delete chat;
+
+                }
+
+    if (!jump_mode_on())
+    {
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "\u26A0\uFE0F Jump mode is off. Vote \"/jump on\" to turn it on.";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        auto peers = STKHost::get()->getPeers();
+        peer->sendPacket(chat, true /* reliable */);
+        delete chat;
+    }
         return true;
     }
     return false;
@@ -5781,6 +5980,8 @@ bool ServerLobby::checkPeersReady(bool ignore_ai_peer) const
 void ServerLobby::handleServerCommand(Event* event,
                                       std::shared_ptr<STKPeer> peer)
 {
+    SoccerWorld* sw = (SoccerWorld*)World::getWorld();
+
     NetworkString& data = event->data();
     std::string language;
     data.decodeString(&language);
@@ -5940,7 +6141,7 @@ void ServerLobby::handleServerCommand(Event* event,
 
         // Check if the password matches
         if (password == argv[2]) {
-            playerlimit = std::stoi(argv[1]);
+            playerlimit = std::stoi(argv[1]) > 14 ? 14 : std::stoi(argv[1]) < 0 ? 14 : std::stoi(argv[1]);
             updatePlayerList();
             NetworkString* chat = getNetworkString();
             chat->addUInt8(LE_CHAT);
@@ -5965,6 +6166,545 @@ void ServerLobby::handleServerCommand(Event* event,
         }
     }
 }
+
+else if (argv[0] == "powerupper")
+{
+    if ((argv.size() < 2) || (argv.size() >3))
+    {
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "Usage: /powerupper [on|off]";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        peer->sendPacket(chat, true/*reliable*/);
+        delete chat;
+        return;
+    }
+    else {
+        // Read the admin password from a file
+        std::ifstream infile("admin_password.txt");
+        std::string password;
+        if (infile.good()) {
+            infile >> password;
+        }
+        else {
+            // Generate a random password and save it to the file
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_int_distribution<> distrib(1000, 9999);
+            password = std::to_string(distrib(gen));
+            std::ofstream outfile("admin_password.txt");
+            outfile << password;
+            outfile.close();
+        }
+
+        // Check if the password matches
+        if ((!argv[2].empty()) && (password == argv[2])) {
+            if (argv[1] == "on") {
+                std::ofstream outfile("powerupper.txt");
+                outfile << "3 20\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)";
+                outfile.close();
+                set_powerup_multiplier(3);
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "Powerupper mode enabled \U0001f7e2";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                auto peers = STKHost::get()->getPeers();
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+                delete chat;
+                powerupper_off.clear();
+                powerupper_on.clear();
+            }
+            else if (argv[1] == "off") {
+                std::ofstream outfile("powerupper.txt");
+                outfile << "1 0\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)";
+                outfile.close();
+                set_powerup_multiplier(1);
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "Powerupper mode disabled \U0001f534";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                auto peers = STKHost::get()->getPeers();
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+                delete chat;
+            }
+            else {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "Invalid state parameter. Usage: /powerupper [on|off]";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                peer->sendPacket(chat, true/*reliable*/);
+                delete chat;
+                return;
+            }
+        }
+
+                else if ((argv.size() > 2) && (password != argv[2]))
+        {
+            NetworkString* chat = getNetworkString();
+            chat->addUInt8(LE_CHAT);
+            chat->setSynchronous(true);
+            std::string msg = "Incorrect password";
+            chat->encodeString16(StringUtils::utf8ToWide(msg));
+            peer->sendPacket(chat, true/*reliable*/);
+            delete chat;
+            return;
+        }
+
+        if (argv.size() == 2) {
+            if (argv[1] == "on") {
+                if (powerupper_mode_on())
+                {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "\u26A0\uFE0F Powerupper mode is already on \u26A0\uFE0F";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                peer->sendPacket(chat, true/*reliable*/);
+                delete chat;
+                return;
+                }
+                else{
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+
+                std::string name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
+                if (std::find(powerupper_on.begin(), powerupper_on.end(), name) == powerupper_on.end())
+                    powerupper_on.push_back(name);
+                std::string msg;
+                 if (powerupper_on.size() == 1)
+                    msg = "\U0001f5f3\uFE0F "+name +" voted /powerupper on. There is "+ std::to_string(powerupper_on.size())+" such vote";
+                else
+                msg = "\U0001f5f3\uFE0F "+name +" voted /powerupper on. There are "+ std::to_string(powerupper_on.size())+" such votes";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                auto peers = STKHost::get()->getPeers();
+                for (auto& p : peers) {
+                    p->sendPacket(chat, true /* reliable */);
+                }
+                delete chat;
+
+                if (powerupper_on.size() > peers.size()/2){
+                    powerupper_off.clear();
+                    powerupper_on.clear();
+                    std::ofstream outfile("powerupper.txt");
+                    outfile << "3 20\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)";
+                    outfile.close();
+                    set_powerup_multiplier(3);
+                    NetworkString* chat = getNetworkString();
+                    chat->addUInt8(LE_CHAT);
+                    chat->setSynchronous(true);
+                    std::string msg = "Powerupper mode enabled \U0001f7e2";
+                    chat->encodeString16(StringUtils::utf8ToWide(msg));
+                    auto peers = STKHost::get()->getPeers();
+                for (auto& p : peers) {
+                    p->sendPacket(chat, true /* reliable */);
+                }
+                    delete chat;
+                    }
+            }
+
+            }
+            else if (argv[1] == "off") {
+                if (!powerupper_mode_on())
+                {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "\u26A0\uFE0F Powerupper mode is already off \u26A0\uFE0F";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                peer->sendPacket(chat, true/*reliable*/);
+                delete chat;
+                return;
+                }
+                else{
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+
+                std::string name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
+                if (std::find(powerupper_off.begin(), powerupper_off.end(), name) == powerupper_off.end())
+                    powerupper_off.push_back(name);
+                std::string msg;
+                 if (powerupper_off.size() == 1)
+                    msg = "\U0001f5f3\uFE0F "+name +" voted /powerupper off. There is "+ std::to_string(powerupper_off.size())+" such vote";
+                else
+                    msg = "\U0001f5f3\uFE0F "+name +" voted /powerupper off. There are "+ std::to_string(powerupper_off.size())+" such votes";
+            chat->encodeString16(StringUtils::utf8ToWide(msg));
+            auto peers = STKHost::get()->getPeers();
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+            delete chat;
+
+            if (powerupper_off.size() > peers.size()/2)
+            {
+                powerupper_off.clear();
+                powerupper_on.clear();
+                std::ofstream outfile("powerupper.txt");
+                outfile << "1 0\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)";
+                outfile.close();
+                set_powerup_multiplier(1);
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "Powerupper mode disabled \U0001f534";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                auto peers = STKHost::get()->getPeers();
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+                delete chat;
+                }
+
+            }
+
+            }
+            else {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "Invalid state parameter. Usage: /powerupper [on|off]";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                peer->sendPacket(chat, true/*reliable*/);
+                delete chat;
+                return;
+            }
+        }
+
+}
+}
+
+
+else if (argv[0] == "jump")
+{
+    if ((argv.size() < 2) || (argv.size() >3))
+    {
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "Usage: /jump [on|off]";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        peer->sendPacket(chat, true/*reliable*/);
+        delete chat;
+        return;
+    }
+    else {
+        // Read the admin password from a file
+        std::ifstream infile("admin_password.txt");
+        std::string password;
+        if (infile.good()) {
+            infile >> password;
+        }
+        else {
+            // Generate a random password and save it to the file
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_int_distribution<> distrib(1000, 9999);
+            password = std::to_string(distrib(gen));
+            std::ofstream outfile("admin_password.txt");
+            outfile << password;
+            outfile.close();
+        }
+
+        // Check if the password matches
+        if ((!argv[2].empty()) && (password == argv[2])) {
+            if (argv[1] == "on") {
+                std::ofstream outfile("jumplimit.txt");
+                outfile << "70\nThis value represents the maximum jump height the kart can reach before further jumping is disabled";
+                outfile.close();
+                set_jump_limit(70.0);
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "Jump mode enabled \U0001f7e2";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                auto peers = STKHost::get()->getPeers();
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+                delete chat;
+                jump_off.clear();
+                jump_on.clear();
+            }
+            else if (argv[1] == "off") {
+                std::ofstream outfile("jumplimit.txt");
+                outfile << "0\nThis value represents the maximum jump height the kart can reach before further jumping is disabled)";
+                outfile.close();
+                set_jump_limit(0.0);
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "Jump mode disabled \U0001f534";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                auto peers = STKHost::get()->getPeers();
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+                delete chat;
+            }
+            else {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "Invalid state parameter. Usage: /jump [on|off]";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                peer->sendPacket(chat, true/*reliable*/);
+                delete chat;
+                return;
+            }
+        }
+
+                else if ((argv.size() > 2) && (password != argv[2]))
+        {
+            NetworkString* chat = getNetworkString();
+            chat->addUInt8(LE_CHAT);
+            chat->setSynchronous(true);
+            std::string msg = "Incorrect password";
+            chat->encodeString16(StringUtils::utf8ToWide(msg));
+            peer->sendPacket(chat, true/*reliable*/);
+            delete chat;
+            return;
+        }
+
+        if (argv.size() == 2) {
+            if (argv[1] == "on") {
+                if (jump_mode_on())
+                {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "\u26A0\uFE0F Jump mode is already on \u26A0\uFE0F";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                peer->sendPacket(chat, true/*reliable*/);
+                delete chat;
+                return;
+                }
+                else{
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+
+                std::string name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
+                if (std::find(jump_on.begin(), jump_on.end(), name) == jump_on.end())
+                    jump_on.push_back(name);
+
+                std::string msg;
+                 if (jump_on.size() == 1)
+                    msg = "\U0001f5f3\uFE0F "+name +" voted /jump on. There is "+ std::to_string(jump_on.size())+" such vote";
+                else
+                msg = "\U0001f5f3\uFE0F "+name +" voted /jump on. There are "+ std::to_string(jump_on.size())+" such votes";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                auto peers = STKHost::get()->getPeers();
+                for (auto& p : peers) {
+                    p->sendPacket(chat, true /* reliable */);
+                }
+                delete chat;
+
+                if (jump_on.size() > peers.size()/2){
+                    jump_off.clear();
+                    jump_on.clear();
+                    std::ofstream outfile("jumplimit.txt");
+                    outfile << "70\nThis value represents the maximum jump height the kart can reach before further jumping is disabled";
+                    outfile.close();
+                    set_jump_limit(70.0);
+                    NetworkString* chat = getNetworkString();
+                    chat->addUInt8(LE_CHAT);
+                    chat->setSynchronous(true);
+                    std::string msg = "Jump mode enabled \U0001f7e2";
+                    chat->encodeString16(StringUtils::utf8ToWide(msg));
+                    auto peers = STKHost::get()->getPeers();
+                for (auto& p : peers) {
+                    p->sendPacket(chat, true /* reliable */);
+                }
+                    delete chat;
+                    }
+            }
+
+            }
+            else if (argv[1] == "off") {
+                if (!jump_mode_on())
+                {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "\u26A0\uFE0F Jump mode is already off \u26A0\uFE0F";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                peer->sendPacket(chat, true/*reliable*/);
+                delete chat;
+                return;
+                }
+                else{
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+
+                std::string name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
+                if (std::find(jump_off.begin(), jump_off.end(), name) == jump_off.end())
+                    jump_off.push_back(name);
+
+                std::string msg;
+                 if (jump_off.size() == 1)
+                    msg = "\U0001f5f3\uFE0F "+name +" voted /jump off. There is "+ std::to_string(jump_off.size())+" such vote";
+                else
+                    msg = "\U0001f5f3\uFE0F "+name +" voted /jump off. There are "+ std::to_string(jump_off.size())+" such votes";
+                    chat->encodeString16(StringUtils::utf8ToWide(msg));
+            auto peers = STKHost::get()->getPeers();
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+            delete chat;
+
+            if (jump_off.size() > peers.size()/2)
+            {
+                powerupper_off.clear();
+                jump_on.clear();
+                std::ofstream outfile("jumplimit.txt");
+                outfile << "0\nThis value represents the maximum jump height the kart can reach before further jumping is disabled";
+                outfile.close();
+                set_jump_limit(0.0);
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "Jump mode disabled \U0001f534";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                auto peers = STKHost::get()->getPeers();
+            for (auto& p : peers) {
+                p->sendPacket(chat, true /* reliable */);
+            }
+                delete chat;
+                }
+
+            }
+
+            }
+            else {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                std::string msg = "Invalid state parameter. Usage: /jump [on|off]";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+                peer->sendPacket(chat, true/*reliable*/);
+                delete chat;
+                return;
+            }
+        }
+
+}
+}
+
+else if (argv[0] == "score")
+{
+        if (m_state.load() != RACING)
+        {
+            NetworkString* chat = getNetworkString();
+            chat->addUInt8(LE_CHAT);
+            chat->setSynchronous(true);
+            std::string msg = "No on-going game!";
+            chat->encodeString16(StringUtils::utf8ToWide(msg));
+            peer->sendPacket(chat, true/*reliable*/);
+            delete chat;
+            return;
+        }
+
+
+        const int red_score = sw->getScore(KART_TEAM_RED);
+        const int blue_score = sw->getScore(KART_TEAM_BLUE);
+
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "\U0001f7e5 Red " + std::to_string(red_score)+ " : " + std::to_string(blue_score) + " Blue \U0001f7e6";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        peer->sendPacket(chat, true/*reliable*/);
+        delete chat;
+
+}
+
+else if ((argv[0] == "changeteam") || (argv[0] == "ct"))
+{
+    if (argv.size() != 3)
+    {
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "Usage: /changeteam [player name] [password]";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        peer->sendPacket(chat, true /* reliable */);
+        delete chat;
+        return;
+    }
+    else
+    {
+        // Read the admin password from a file
+        std::ifstream infile("admin_password.txt");
+        std::string password;
+        if (infile.good()) {
+            infile >> password;
+        }
+        else {
+            // Generate a random password and save it to the file
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_int_distribution<> distrib(1000, 9999);
+            password = std::to_string(distrib(gen));
+            std::ofstream outfile("admin_password.txt");
+            outfile << password;
+            outfile.close();
+        }
+
+        // Check if the password matches
+        if (password == argv[2])
+        {
+            std::shared_ptr<STKPeer> player_peer = STKHost::get()->findPeerByName(
+                StringUtils::utf8ToWide(argv[1]));
+
+            if (!player_peer || player_peer->isAIPeer())
+            {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                chat->encodeString16(
+                    L"Player not found or cannot change team");
+                peer->sendPacket(chat, true /* reliable */);
+                delete chat;
+            }
+            else
+            {
+                KartTeam current_team = player_peer->getPlayerProfiles()[0]->getTeam();
+
+                if (current_team == KART_TEAM_RED)
+                {
+                    player_peer->getPlayerProfiles()[0]->setTeam(KART_TEAM_BLUE);
+                }
+                else if (current_team == KART_TEAM_BLUE)
+                {
+                    player_peer->getPlayerProfiles()[0]->setTeam(KART_TEAM_RED);
+                }
+
+                updatePlayerList();
+            }
+        }
+        else
+        {
+            NetworkString* chat = getNetworkString();
+            chat->addUInt8(LE_CHAT);
+            chat->setSynchronous(true);
+            chat->encodeString16(
+                L"Incorrect password");
+            peer->sendPacket(chat, true /* reliable */);
+            delete chat;
+        }
+    }
+}
+
 
        else if (argv[0] == "help")
     {
@@ -6128,38 +6868,72 @@ void ServerLobby::handleServerCommand(Event* event,
         peer->sendPacket(chat, true/*reliable*/);
         delete chat;
     }
-    else if (StringUtils::startsWith(cmd, "kick"))
+else if (StringUtils::startsWith(cmd, "kick"))
+{
+    std::vector<std::string> argv = StringUtils::split(cmd, ' ');
+    if (argv.size() != 3)
     {
-        if (m_server_owner.lock() != peer)
-        {
-            NetworkString* chat = getNetworkString();
-            chat->addUInt8(LE_CHAT);
-            chat->setSynchronous(true);
-            chat->encodeString16(L"You are not server owner");
-            peer->sendPacket(chat, true/*reliable*/);
-            delete chat;
-            return;
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "Usage: /kick [player name] [password]";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        peer->sendPacket(chat, true /* reliable */);
+        delete chat;
+        return;
+    }
+    else
+    {
+        // Read the admin password from a file
+        std::ifstream infile("admin_password.txt");
+        std::string password;
+        if (infile.good()) {
+            infile >> password;
         }
-        std::string player_name;
-        if (cmd.length() > 5)
-            player_name = cmd.substr(5);
-        std::shared_ptr<STKPeer> player_peer = STKHost::get()->findPeerByName(
-            StringUtils::utf8ToWide(player_name));
-        if (player_name.empty() || !player_peer || player_peer->isAIPeer())
+        else {
+            // Generate a random password and save it to the file
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_int_distribution<> distrib(1000, 9999);
+            password = std::to_string(distrib(gen));
+            std::ofstream outfile("admin_password.txt");
+            outfile << password;
+            outfile.close();
+        }
+
+        // Check if the password matches
+        if (password == argv[2])
+        {
+            std::shared_ptr<STKPeer> player_peer = STKHost::get()->findPeerByName(
+                StringUtils::utf8ToWide(argv[1]));
+            if (!player_peer || player_peer->isAIPeer())
+            {
+                NetworkString* chat = getNetworkString();
+                chat->addUInt8(LE_CHAT);
+                chat->setSynchronous(true);
+                chat->encodeString16(
+                    L"Player not found or cannot be kicked");
+                peer->sendPacket(chat, true /* reliable */);
+                delete chat;
+            }
+            else
+            {
+                player_peer->kick();
+            }
+        }
+        else
         {
             NetworkString* chat = getNetworkString();
             chat->addUInt8(LE_CHAT);
             chat->setSynchronous(true);
             chat->encodeString16(
-                L"Usage: /kick [player name]");
-            peer->sendPacket(chat, true/*reliable*/);
+                L"Incorrect password");
+            peer->sendPacket(chat, true /* reliable */);
             delete chat;
         }
-        else
-        {
-            player_peer->kick();
-        }
     }
+}
+
     else if (StringUtils::startsWith(cmd, "playeraddonscore"))
     {
         NetworkString* chat = getNetworkString();
