@@ -38,6 +38,7 @@
 #include "race/race_manager.hpp"
 #include "utils/constants.hpp"
 #include "utils/string_utils.hpp"
+#include "modes/soccer_world.hpp"
 
 #include <IMesh.h>
 #include <fstream>
@@ -46,7 +47,7 @@
 using namespace std;
 
 PowerupManager* powerup_manager=0;
-
+static unsigned int powerup_multiplier = 3;
 //-----------------------------------------------------------------------------
 /** The constructor initialises everything to zero. */
 PowerupManager::PowerupManager()
@@ -57,7 +58,10 @@ PowerupManager::PowerupManager()
         m_all_meshes[i] = NULL;
         m_all_icons[i]  = (Material*)NULL;
     }
-}   // PowerupManager
+
+
+
+} // PowerupManager
 
 //-----------------------------------------------------------------------------
 /** Destructor, frees all meshes. */
@@ -78,7 +82,7 @@ PowerupManager::~PowerupManager()
                 irr_driver->removeMeshFromCache(mesh);
         }
     }
-    
+
     for(auto key: m_all_weights)
     {
         for(auto p: key.second )
@@ -86,6 +90,10 @@ PowerupManager::~PowerupManager()
     }
 }   // ~PowerupManager
 
+void set_powerup_multiplier(unsigned int value)
+{
+    powerup_multiplier = value;
+}
 //-----------------------------------------------------------------------------
 /** Removes any textures so that they can be reloaded.
  */
@@ -149,7 +157,7 @@ void PowerupManager::loadPowerupsModels()
             exit(-1);
         }
     }
-    
+
     loadWeights(root, "race-weight-list"    );
     loadWeights(root, "ftl-weight-list"     );
     loadWeights(root, "battle-weight-list"  );
@@ -213,6 +221,20 @@ void PowerupManager::WeightsData::reset()
     m_weights_for_section.clear();
     m_summed_weights_for_rank.clear();
     m_num_karts = 0;
+
+    fstream file;
+    file.open("powerupper.txt", ios::in); // Open file for reading
+
+    if (file.good()) // Check if file exists
+    {
+        file >> powerup_multiplier;
+    }
+    else
+    {                                                                                                                                                                                               // File exists, read from it
+        file.open("powerupper.txt", ios::out);                                                                                                                                                      // Create file if it does not exist
+        file << "3 20\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)"; // Write default values to file
+    }
+    file.close();
 }   // reset
 
 //-----------------------------------------------------------------------------
@@ -329,7 +351,7 @@ void PowerupManager::WeightsData::convertRankToSection(int rank, int *prev,
         return;
     }
 
-    // In FTL mode the first section is for the leader, the 
+    // In FTL mode the first section is for the leader, the
     // second section is used for the first non-leader kart.
     if (RaceManager::get()->isFollowMode() && rank == 2)
     {
@@ -606,19 +628,7 @@ PowerupManager::PowerupType PowerupManager::getRandomPowerup(unsigned int pos,
                                                              unsigned int *n,
                                                              uint64_t random_number, bool win)
 {
-    fstream file;
-    float value1;
-    file.open("powerupper.txt", ios::in); // Open file for reading
-    if (!file) // Check if file exists
-    {
-    file.open("powerupper.txt", ios::out); // Create file if it does not exist
-    file << "3 20\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)"; // Write default values to file
-    value1 = 3; // Set default values
-    }
-    else // File exists, read from it
-    file >> value1;
-    file.close();
-
+    SoccerWorld* sw = (SoccerWorld*)World::getWorld();
     int powerup = m_current_item_weights.getRandomItem(pos-1, random_number);
     if(powerup > POWERUP_LAST)
     {
@@ -626,13 +636,21 @@ PowerupManager::PowerupType PowerupManager::getRandomPowerup(unsigned int pos,
         *n = 3;
     }
     else{
-        if(!win) *n=value1;
+        if(!win){
+
+            const int red_score = sw->getScore(KART_TEAM_RED);
+            const int blue_score = sw->getScore(KART_TEAM_BLUE);
+            int diff = abs(red_score-blue_score);
+            if (diff > 4) diff =4;
+            if (powerup_multiplier == 3) powerup_multiplier = diff+1;
+            *n=powerup_multiplier;
+        }
 
         else *n=1;
     }
 
     // Prevents early explosive items
-    if (World::getWorld() && 
+    if (World::getWorld() &&
         stk_config->ticks2Time(World::getWorld()->getTicksSinceStart()) <
                                       stk_config->m_no_explosive_items_timeout)
     {
