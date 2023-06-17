@@ -37,6 +37,8 @@ protected:
 
     virtual void  steer(int ticks, int steer_val);
 
+    float jump_value1, jump_value2, jump_value3_sta, jump_value3_mov, jump_value4_sta, jump_value4_mov, jump_distance_threshold_static, jump_distance_threshold_moving, jump_distance_max_fastjumping, jump_karty_threshold, jump_ball_height_min, jump_ball_height_max, jump_ball_vel_min, jump_limit;
+
 public:
                  PlayerController(AbstractKart *kart);
     virtual     ~PlayerController  ();
@@ -81,7 +83,7 @@ public:
     /** Player will always be able to get a slipstream bonus. */
     virtual bool  disableSlipstreamBonus() const OVERRIDE
     {
-        return false; 
+        return false;
     }
     // ------------------------------------------------------------------------
     /** Called when a race is finished. */
