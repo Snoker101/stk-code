@@ -49,7 +49,7 @@
 #include <chrono>  // for std::chrono::seconds
 #include <thread>  // for std::this_thread::sleep_for
 using namespace std;
-static float jump_limit = 70;
+float jump_limit = 70;
 PlayerController::PlayerController(AbstractKart *kart)
     : Controller(kart), jump_value1(8.0),
       jump_value2(8.0),
@@ -90,10 +90,10 @@ void read_values(std::string filename, std::initializer_list<float*> store_targe
     else
     {
         file.open(filename, ios::out);                                                                                                                    // Create file if it does not exist
-        std::string separator = "";
+        std::string separator = " ";
         for (float* target: store_target){
-            file << *target;
-            separator = " ";
+            file << *target<< separator;
+
         }
         file << endl;
         file << documentation;
