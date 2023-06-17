@@ -1139,7 +1139,7 @@ void Kart::collectedItem(ItemState *item_state)
     {
     file.open("powerupper.txt", ios::out); // Create file if it does not exist
     file << "3 20\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)"; // Write default values to file
-    value2 = 3; // Set default values
+    value2 = 20; // Set default values
     }
     else // File exists, read from it
     file >> value1>> value2;
@@ -1151,7 +1151,12 @@ void Kart::collectedItem(ItemState *item_state)
     float ibost = 0; // I added !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     SoccerWorld* sw = dynamic_cast<SoccerWorld*>(World::getWorld()); // I added !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     bool winy = sw->getKartSoccerResult(this->getWorldKartId()); // I added !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    if (!winy) ibost = value2; // I added !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    const int red_score = sw->getScore(KART_TEAM_RED);
+    const int blue_score = sw->getScore(KART_TEAM_BLUE);
+    int diff = abs(red_score-blue_score);
+    if (!winy) ibost = (diff+1)*round(value2/7); // I added !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 
     switch (type)
     {
