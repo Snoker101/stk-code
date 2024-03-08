@@ -597,7 +597,7 @@ public:
 
 };   // Kart
 
-
+void set_nitro_multiplier(unsigned int value);
 #endif
 
 /* EOF */
