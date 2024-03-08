@@ -2,6 +2,9 @@
 //  SuperTuxKart - a fun racing game with go-kart
 //  Copyright (C) 2007-2015 Joerg Henrichs
 //
+//  Physics improvements and linear intersection algorithm by
+//  Copyright (C) 2009-2015 David Mikos.
+//
 //  This program is free software; you can redistribute it and/or
 //  modify it under the terms of the GNU General Public License
 //  as published by the Free Software Foundation; either version 3
@@ -16,143 +19,47 @@
 //  along with this program; if not, write to the Free Software
 //  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
-#include "items/bowling.hpp"
+#include "items/cake.hpp"
 
-#include "audio/sfx_base.hpp"
-#include "audio/sfx_manager.hpp"
-#include "graphics/hit_sfx.hpp"
-#include "graphics/material.hpp"
 #include "io/xml_node.hpp"
 #include "karts/abstract_kart.hpp"
-#include "modes/linear_world.hpp"
+#include "utils/constants.hpp"
+#include "utils/random_generator.hpp"
 
 #include "utils/log.hpp" //TODO: remove after debugging is done
 
-float Bowling::m_st_max_distance;   // maximum distance for a bowling ball to be attracted
-float Bowling::m_st_max_distance_squared;
-float Bowling::m_st_force_to_target;
+float Cake::m_st_max_distance_squared;
+float Cake::m_gravity;
+
+Cake::Cake (AbstractKart *kart) : Flyable(kart, PowerupManager::POWERUP_CAKE)
+{
+    m_target = NULL;
+}   // Cake
 
 // -----------------------------------------------------------------------------
-Bowling::Bowling(AbstractKart *kart)
-        : Flyable(kart, PowerupManager::POWERUP_BOWLING, 50.0f /* mass */)
-{
-    m_has_hit_kart = false;
-    m_roll_sfx = SFXManager::get()->createSoundSource("bowling_roll");
-    fixSFXSplitscreen(m_roll_sfx);
-    m_roll_sfx->play();
-    m_roll_sfx->setLoop(true);
-}   // Bowling
-
-// ----------------------------------------------------------------------------
-/** Destructor, removes any playing sfx.
+/** Initialises the object from an entry in the powerup.xml file.
+ *  \param node The xml node for this object.
+ *  \param cakde_model The mesh model of the cake.
  */
-Bowling::~Bowling()
+void Cake::init(const XMLNode &node, scene::IMesh *cake_model)
 {
-    // This will stop the sfx and delete the object.
-    removeRollSfx();
-}   // ~RubberBall
+    Flyable::init(node, cake_model, PowerupManager::POWERUP_CAKE);
+    float max_distance        = 80.0f;
+    m_gravity                 = 9.8f;
 
-// -----------------------------------------------------------------------------
-/** Initialises this object with data from the power.xml file.
- *  \param node XML Node
- *  \param bowling The bowling ball mesh
- */
-void Bowling::init(const XMLNode &node, scene::IMesh *bowling)
-{
-    Flyable::init(node, bowling, PowerupManager::POWERUP_BOWLING);
-    m_st_max_distance         = 20.0f;
-    m_st_max_distance_squared = 20.0f * 20.0f;
-    m_st_force_to_target      = 10.0f;
-
-    node.get("max-distance",    &m_st_max_distance   );
-    m_st_max_distance_squared = m_st_max_distance*m_st_max_distance;
-
-    node.get("force-to-target", &m_st_force_to_target);
+    node.get("max-distance",    &max_distance  );
+    m_st_max_distance_squared = max_distance*max_distance;
 }   // init
 
 // ----------------------------------------------------------------------------
-/** Updates the bowling ball ineach frame. If this function returns true, the
- *  object will be removed by the projectile manager.
- *  \param dt Time step size.
- *  \returns True of this object should be removed.
- */
-bool Bowling::updateAndDelete(int ticks)
-{
-    bool can_be_deleted = Flyable::updateAndDelete(ticks);
-    if (can_be_deleted)
-    {
-        removeRollSfx();
-        return true;
-    }
-
-    const AbstractKart *kart=0;
-    Vec3        direction;
-    float       minDistance;
-    getClosestKart(&kart, &minDistance, &direction);
-    if(kart && minDistance<m_st_max_distance_squared)   // move bowling towards kart
-    {
-        // limit angle, so that the bowling ball does not turn
-        // around to hit a kart behind
-        if(fabs(m_body->getLinearVelocity().angle(direction)) < 1.3)
-        {
-            direction*=1/direction.length()*m_st_force_to_target;
-            m_body->applyCentralForce(direction);
-        }
-    }
-    
-   
-    // Bowling balls lose energy (e.g. when hitting the track), so increase
-    // the speed if the ball is too slow, but only if it's not too high (if
-    // the ball is too high, it is 'pushed down', which can reduce the
-    // speed, which causes the speed to increase, which in turn causes
-    // the ball to fly higher and higher.
-    //btTransform trans = getTrans();
-    float hat = (getXYZ() - getHitPoint()).length();
-    if(hat-0.5f*m_extend.getY()<0.01f)
-    {
-        const Material *material = getMaterial();
-        if(!material || material->isDriveReset())
-        {
-            hit(NULL);
-            removeRollSfx();
-            return true;
-        }
-    }
-    btVector3 v       = m_body->getLinearVelocity();
-    float vlen        = v.length2();
-    if (hat<= m_max_height)
-    {
-        if(vlen<0.8*m_speed*m_speed)
-        {   // bowling lost energy (less than 80%), i.e. it's too slow - speed it up:
-            if(vlen==0.0f) {
-                v = btVector3(.5f, .0, 0.5f);  // avoid 0 div.
-            }
- //           m_body->setLinearVelocity(v*(m_speed/sqrt(vlen)));
-        }   // vlen < 0.8*m_speed*m_speed
-    }   // hat< m_max_height
-
-    if(vlen<0.1)
-    {
-        hit(NULL);
-        removeRollSfx();
-        return true;
-    }
-
-    if (m_roll_sfx && m_roll_sfx->getStatus()==SFXBase::SFX_PLAYING)
-        m_roll_sfx->setPosition(getXYZ());
-
-    return false;
-}   // updateAndDelete
-
-// -----------------------------------------------------------------------------
 /** Callback from the physics in case that a kart or physical object is hit.
- *  The bowling ball triggers an explosion when hit.
+ *  The cake triggers an explosion when hit.
  *  \param kart The kart hit (NULL if no kart was hit).
  *  \param object The object that was hit (NULL if none).
  *  \returns True if there was actually a hit (i.e. not owner, and target is
  *           not immune), false otherwise.
  */
-bool Bowling::hit(AbstractKart* kart, PhysicalObject* obj)
+bool Cake::hit(AbstractKart* kart, PhysicalObject* obj)
 {
     bool was_real_hit = Flyable::hit(kart, obj);
     if(was_real_hit)
@@ -160,80 +67,104 @@ bool Bowling::hit(AbstractKart* kart, PhysicalObject* obj)
         if(kart && kart->isShielded())
         {
             kart->decreaseShieldTime();
-            return true;
+            return false; //Not sure if a shield hit is a real hit.
         }
-        else
-        {
-            m_has_hit_kart = kart != NULL;
-            explode(kart, obj, /*hit_secondary*/false);
-        }
+        explode(kart, obj);
     }
+
     return was_real_hit;
 }   // hit
 
 // ----------------------------------------------------------------------------
-void Bowling::removeRollSfx()
-{
-    if (m_roll_sfx)
-    {
-        m_roll_sfx->deleteSFX();
-        m_roll_sfx = NULL;
-    }
-}   // removeRollSfx
-
-// ----------------------------------------------------------------------------
-/** Returns the hit effect object to use when this objects hits something.
- *  \returns The hit effect object, or NULL if no hit effect should be played.
- */
-HitEffect* Bowling::getHitEffect() const
-{
-    if (GUIEngine::isNoGraphics())
-        return NULL;
-    if (m_deleted_once)
-        return NULL;
-    if(m_has_hit_kart)
-        return new HitSFX(getXYZ(), "strike");
-    else
-        return new HitSFX(getXYZ(), "crash");
-}   // getHitEffect
-
-// ----------------------------------------------------------------------------
-void Bowling::onFireFlyable()
+void Cake::onFireFlyable()
 {
     Flyable::onFireFlyable();
+    setDoTerrainInfo(false);
 
-    m_has_hit_kart = false;
-    float y_offset = 0.5f*m_owner->getKartLength() + m_extend.getZ()*0.5f;
+    btVector3 gravity_vector;
+    btQuaternion q = m_owner->getTrans().getRotation();
+    gravity_vector = Vec3(0, -1, 0).rotate(q.getAxis(), q.getAngle());
+    gravity_vector = gravity_vector.normalize() * m_gravity;
+    // A bit of a hack: the mass of this kinematic object is still 1.0
+    // (see flyable), which enables collisions. I tried setting
+    // collisionFilterGroup/mask, but still couldn't get this object to
+    // collide with the track. By setting the mass to 1, collisions happen.
+    // (if bullet is compiled with _DEBUG, a warning will be printed the first
+    // time a homing-track collision happens).
+    float forward_offset=m_owner->getKartLength()/2.0f + m_extend.getZ()/2.0f;
 
-    // if the kart is looking backwards, release from the back
-    if( m_owner->getControls().getLookBack())
+    float up_velocity = m_speed/7.0f;
+
+    const bool  backwards = m_owner->getControls().getLookBack();
+
+    // give a speed proportional to kart speed. m_speed is defined in flyable.
+    // when going backwards and not looking backwards,
+    // decrease speed of cake by less
+    if (m_owner->getSpeed() < 0 && !backwards)
+        m_speed *= m_owner->getSpeed() / 23.0f /3.6f;
+    else
+    m_speed *= abs(m_owner->getSpeed()) / 23.0f;
+    m_speed += 16.0f;
+
+    if (m_speed < 1.0f) m_speed = 1.0f;
+
+    btTransform trans = m_owner->getTrans();
+
+    float heading=m_owner->getHeading();
+    float pitch = m_owner->getTerrainPitch(heading);
+
+    // Find closest kart in front of the current one
+    const AbstractKart *closest_kart=NULL;
+    Vec3        direction;
+    float       kart_dist_squared;
+    getClosestKart(&closest_kart, &kart_dist_squared, &direction,
+                   m_owner /* search in front of this kart */, backwards);
+
+    // aim at this kart if 1) it's not too far, 2) if the aimed kart's speed
+    // allows the projectile to catch up with it
+    //
+    // this code finds the correct angle and upwards velocity to hit an opponents'
+    // vehicle if they were to continue travelling in the same direction and same speed
+    // (barring any obstacles in the way of course)
+    if(closest_kart != NULL && kart_dist_squared < m_st_max_distance_squared &&
+        m_speed>closest_kart->getSpeed())
     {
-        y_offset   = -y_offset;
-        m_speed    = -m_speed*2;
+        m_target = (AbstractKart*)closest_kart;
+
+        float fire_angle     = 0.0f;
+        getLinearKartItemIntersection (m_owner->getXYZ(), closest_kart,
+                                       m_speed, m_gravity, forward_offset,
+                                       &fire_angle, &up_velocity);
+
+        // apply transformation to the bullet object (without pitch)
+        btQuaternion q;
+        q = trans.getRotation() * btQuaternion(btVector3(0, 1, 0), fire_angle);
+        trans.setRotation(q);
+        m_initial_velocity = Vec3(0.0f, up_velocity, m_speed);
+
+        createPhysics(forward_offset, m_initial_velocity,
+                      new btCylinderShape(0.5f*m_extend),
+                      0.5f /* restitution */, gravity_vector,
+                      true /* rotation */, false /* backwards */, &trans);
     }
     else
     {
-        float min_speed = m_speed*4.0f;
-        /* make it go faster when throwing forward
-           so the player doesn't catch up with the ball
-           and explode by touching it */
-        m_speed = m_owner->getSpeed() + m_speed;
-        if(m_speed < min_speed) m_speed = min_speed;
+        m_target = NULL;
+        // kart is too far to be hit. so throw the projectile in a generic way,
+        // straight ahead, without trying to hit anything in particular
+        trans = m_owner->getAlignedTransform(pitch);
+
+        m_initial_velocity = Vec3(0.0f, up_velocity, m_speed);
+
+        createPhysics(forward_offset, m_initial_velocity,
+                      new btCylinderShape(0.5f*m_extend),
+                      0.5f /* restitution */, gravity_vector,
+                      true /* rotation */, backwards, &trans);
     }
 
-    const Vec3& normal = m_owner->getNormal();
-    createPhysics(y_offset, btVector3(0.0f, 0.0f, m_speed*2),
-                  new btSphereShape(0.5f*m_extend.getY()),
-                  0.4f /*restitution*/,
-                  -70.0f*normal /*gravity*/,
-                  true /*rotates*/);
-    // Even if the ball is fired backwards, m_speed must be positive,
-    // otherwise the ball can start to vibrate when energy is added.
-    m_speed = fabsf(m_speed);
-    // Do not adjust the up velociy depending on height above terrain, since
-    // this would disable gravity.
+    //do not adjust height according to terrain
     setAdjustUpVelocity(false);
-
-    // should not live forever, auto-destruct after 20 seconds
-    m_max_lifespan = stk_config->time2Ticks(20);
+    m_body->setActivationState(DISABLE_DEACTIVATION);
+    m_body->clearForces();
+    m_body->applyTorque(btVector3(5.0f, -3.0f, 7.0f));
 }   // onFireFlyable
