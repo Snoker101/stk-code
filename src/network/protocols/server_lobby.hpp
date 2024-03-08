@@ -390,6 +390,7 @@ public:
     virtual void asynchronousUpdate() OVERRIDE;
 
     void startSelection(const Event *event=NULL);
+    void send_message(std::string msg);
     void checkIncomingConnectionRequests();
     void finishedLoadingWorld() OVERRIDE;
     ServerState getCurrentState() const { return m_state.load(); }
