@@ -34,6 +34,7 @@
 #include "items/cake.hpp"
 #include "items/plunger.hpp"
 #include "items/rubber_ball.hpp"
+#include "karts/kart.hpp"
 #include "modes/world.hpp"
 #include "race/race_manager.hpp"
 #include "utils/constants.hpp"
@@ -93,6 +94,10 @@ PowerupManager::~PowerupManager()
 void set_powerup_multiplier(unsigned int value)
 {
     powerup_multiplier = value;
+    if (value == 3)
+    set_nitro_multiplier(20);
+    else if (value == 1)
+    set_nitro_multiplier(0);
 }
 //-----------------------------------------------------------------------------
 /** Removes any textures so that they can be reloaded.
