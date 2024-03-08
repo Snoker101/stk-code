@@ -104,6 +104,7 @@
 #include <thread>  // for std::this_thread::sleep_for
 using namespace std;
 
+unsigned int nitro_multiplier = 0;
 
 #if defined(WIN32) && !defined(__CYGWIN__)  && !defined(__MINGW32__)
    // Disable warning for using 'this' in base member initializer list
@@ -192,6 +193,10 @@ Kart::Kart (const std::string& ident, unsigned int world_kart_id,
     m_previous_terrain_sound = NULL;
 }   // Kart
 
+void set_nitro_multiplier(unsigned int value)
+{
+    nitro_multiplier = value;
+}
 // -----------------------------------------------------------------------------
 /** This is a second initialisation phase, necessary since in the constructor
  *  virtual functions are not called for any superclasses.
@@ -424,14 +429,14 @@ void Kart::reset()
 
     m_controls.reset();
     m_slipstream->reset();
-    
+
     if(m_vehicle)
     {
         for (unsigned int i = 0; i < 4; i++)
         {
             m_vehicle->getWheelInfo(i).m_steering = 0;
         }
-            
+
         m_vehicle->reset();
     }
 
@@ -643,7 +648,7 @@ btTransform Kart::getAlignedTransform(const float custom_pitch)
     trans2.setIdentity();
     trans2.setRotation(btQuaternion(m_skidding->getVisualSkidRotation(), 0, 0));
     trans *= trans2;
-    
+
     return trans;
 }   // getAlignedTransform
 
@@ -712,7 +717,7 @@ void Kart::createPhysics()
                     }
                     // The y position of the wheels (i.e. the points where
                     // the suspension is attached to) is just at the
-                    // bottom of the kart (independent of collision shape). 
+                    // bottom of the kart (independent of collision shape).
                     // That is half the kart height down.
                     wheel_pos[index].setY(-0.5f*kart_height);
                 }  // if y==-1
@@ -953,7 +958,7 @@ void Kart::finishedRace(float time, bool from_server)
             RaceEventManager::get()->kartFinishedRace(this, time);
         }   // isServer
 
-        // Ignore local detection of a kart finishing a race in a 
+        // Ignore local detection of a kart finishing a race in a
         // network game.
         else if (NetworkConfig::get()->isClient())
         {
@@ -1013,26 +1018,21 @@ void Kart::finishedRace(float time, bool from_server)
         RaceGUIBase* m = World::getWorld()->getRaceGUI();
         if (m)
         {
-            bool won_the_race = false, too_slow = false, one_kart = false;
+            bool won_the_race = false, too_slow = false;
             unsigned int win_position = 1;
 
             if (RaceManager::get()->getMinorMode() == RaceManager::MINOR_MODE_FOLLOW_LEADER)
                 win_position = 2;
 
-            // There is no win if there is no possibility of losing
-            if (RaceManager::get()->getNumberOfKarts() == 1)
-                one_kart = true;
-
             if ((getPosition() == (int)win_position &&
-                World::getWorld()->getNumKarts() > win_position))
+                World::getWorld()->getNumKarts() > win_position) || RaceManager::get()->getNumberOfKarts() == 1)
                 won_the_race = true;
 
             if (RaceManager::get()->hasTimeTarget() && m_finish_time > RaceManager::get()->getTimeTarget())
                 too_slow = true;
 
-            m->addMessage((too_slow     ? _("You were too slow!")     :
-                           one_kart     ? _("You finished the race!") :
-                           won_the_race ? _("You won the race!")      :
+            m->addMessage((too_slow     ? _("You were too slow!") :
+                           won_the_race ? _("You won the race!")  :
                                           _("You finished the race in rank %d!", getPosition())),
             this, 2.0f, video::SColor(255, 255, 255, 255), true, true, true);
         }
@@ -1136,32 +1136,21 @@ void Kart::setRaceResult()
  */
 void Kart::collectedItem(ItemState *item_state)
 {
-
-    fstream file;
-    float value1, value2;
-    file.open("powerupper.txt", ios::in); // Open file for reading
-    if (!file) // Check if file exists
-    {
-    file.open("powerupper.txt", ios::out); // Create file if it does not exist
-    file << "3 20\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)"; // Write default values to file
-    value2 = 20; // Set default values
-    }
-    else // File exists, read from it
-    file >> value1>> value2;
-    file.close();
-
     float old_energy          = m_collected_energy;
     const Item::ItemType type = item_state->getType();
 
     float ibost = 0; // I added !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+    if (nitro_multiplier == 20)
+    {
     SoccerWorld* sw = dynamic_cast<SoccerWorld*>(World::getWorld()); // I added !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     bool winy = sw->getKartSoccerResult(this->getWorldKartId()); // I added !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
     const int red_score = sw->getScore(KART_TEAM_RED);
     const int blue_score = sw->getScore(KART_TEAM_BLUE);
     int diff = abs(red_score-blue_score);
-    if (!winy) ibost = (diff+1)*round(value2/7); // I added !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
+    if (!winy) ibost = (diff+1)*round(nitro_multiplier/7); // I added !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    }
 
     switch (type)
     {
@@ -1180,7 +1169,7 @@ void Kart::collectedItem(ItemState *item_state)
             break;
         }
     case Item::ITEM_BUBBLEGUM:
-        m_has_caught_nolok_bubblegum = 
+        m_has_caught_nolok_bubblegum =
             (item_state->getPreviousOwner()&&
              item_state->getPreviousOwner()->getIdent() == "nolok");
 
@@ -1464,7 +1453,7 @@ void Kart::update(int ticks)
         m_invulnerable_ticks = stk_config->time2Ticks(time);
     }
 
-    // Update the locally maintained speed of the kart (m_speed), which 
+    // Update the locally maintained speed of the kart (m_speed), which
     // is used furthermore for engine power, camera distance etc
     updateSpeed();
     // Make the restitution depend on speed: this avoids collision issues,
@@ -1848,7 +1837,7 @@ void Kart::updateSpeed()
     // In theory <0 should be sufficient, but floating point errors can cause
     // flipping from +eps to -eps and back, resulting in animation flickering
     // if the kart has backpedal animations.
-    if (forwardW.dot(getVehicle()->getRigidBody()->getLinearVelocity()) 
+    if (forwardW.dot(getVehicle()->getRigidBody()->getLinearVelocity())
         < btScalar(-0.01f))
     {
         m_speed = -m_speed;
@@ -1897,7 +1886,7 @@ bool Kart::setSquash(float time, float slowdown)
     }
 
     m_max_speed->setSlowdown(MaxSpeed::MS_DECREASE_SQUASH, slowdown,
-                             stk_config->time2Ticks(0.1f), 
+                             stk_config->time2Ticks(0.1f),
                              stk_config->time2Ticks(time));
     return true;
 }   // setSquash
@@ -1975,7 +1964,7 @@ void Kart::handleMaterialSFX()
     // entered), the oldest (previous) sfx is stopped and deleted.
 
     // FIXME: if there are already two sfx playing, don't add another
-    // one. This should reduce the performance impact when driving 
+    // one. This should reduce the performance impact when driving
     // on the bridge in Cocoa.
     const Material* material =
         isOnGround() ? m_terrain_info->getMaterial() : NULL;
@@ -2036,7 +2025,7 @@ void Kart::handleMaterialSFX()
 
     // terrain sound is not necessarily a looping sound so check its status before
     // setting its speed, to avoid 'ressuscitating' sounds that had already stopped
-    if(m_terrain_sound && 
+    if(m_terrain_sound &&
         (m_terrain_sound->getStatus()==SFXBase::SFX_PLAYING ||
          m_terrain_sound->getStatus()==SFXBase::SFX_PAUSED)    )
     {
@@ -2502,11 +2491,11 @@ void Kart::playCrashSFX(const Material* m, AbstractKart *k)
         if (getVelocity().length()> 0.555f)
         {
             const float speed_for_max_volume = 15; //The speed at which the sound plays at maximum volume
-            const float max_volume = 1; //The maximum volume a sound is played at 
-            const float min_volume = 0.2f; //The minimum volume a sound is played at 
-            
+            const float max_volume = 1; //The maximum volume a sound is played at
+            const float min_volume = 0.2f; //The minimum volume a sound is played at
+
             float volume; //The volume the crash sound will be played at
-            
+
             if (k == NULL) //Collision with wall
             {
                 volume = sqrt( abs(m_speed / speed_for_max_volume));
@@ -2517,16 +2506,16 @@ void Kart::playCrashSFX(const Material* m, AbstractKart *k)
                 const Vec3 OtherKartVelocity = k->getVelocity();
                 const Vec3 VelocityDifference = ThisKartVelocity - OtherKartVelocity;
                 const float LengthOfDifference = VelocityDifference.length();
-            
+
                 volume = sqrt( abs(LengthOfDifference / speed_for_max_volume));
             }
-            
+
             if (volume > max_volume) { volume = max_volume; }
             else if (volume < min_volume) { volume = min_volume; }
 
             SFXBase* crash_sound_emitter = getNextEmitter();
             crash_sound_emitter->setVolume(volume);
-            
+
             // In case that the sfx is longer than 0.5 seconds, only play it if
             // it's not already playing.
             if (isShielded() || (k != NULL && k->isShielded()))
@@ -2695,7 +2684,7 @@ void Kart::updatePhysics(int ticks)
 }   // updatephysics
 
 //-----------------------------------------------------------------------------
-/** Adjust the engine sound effect depending on the speed of the kart. This 
+/** Adjust the engine sound effect depending on the speed of the kart. This
  *  is called during updateGraphics, i.e. once per rendered frame only.
  *  \param dt Time step size.
  */
@@ -2740,7 +2729,7 @@ void Kart::updateEngineSFX(float dt)
 
 //-----------------------------------------------------------------------------
 /** Reduces the engine power according to speed
- *  
+ *
  *  TODO : find where the physics already apply a linear force decrease
  *  TODO : While this work fine, it should ideally be in physics
  *         However, the function use some kart properties and parachute
@@ -2845,7 +2834,7 @@ void Kart::updateEnginePowerAndBrakes(int ticks)
 
         // This also applies parachute physics if relevant
         engine_power = applyAirFriction(engine_power);
-       
+
         if(m_controls.getBrake())
         {   // check if the player is currently only slowing down
             // or moving backwards
@@ -3352,7 +3341,7 @@ void Kart::updateGraphics(float dt)
         int max_lean_sign = extract_sign(max_lean);
         m_current_lean += max_lean_sign * dt* roll_speed;
         if(  (max_lean > 0 && m_current_lean > max_lean)
-           ||(max_lean < 0 && m_current_lean < max_lean)) 
+           ||(max_lean < 0 && m_current_lean < max_lean))
             m_current_lean = max_lean;
     }
     else if(m_current_lean!=0.0f)
@@ -3438,7 +3427,7 @@ void Kart::setOnScreenText(const core::stringw& text)
 #ifndef SERVER_ONLY
     if (GUIEngine::isNoGraphics())
         return;
-        
+
     BoldFace* bold_face = font_manager->getFont<BoldFace>();
     STKTextBillboard* tb =
         new STKTextBillboard(
