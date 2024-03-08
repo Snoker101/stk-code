@@ -22,6 +22,7 @@
 #include "audio/sfx_base.hpp"
 #include "config/user_config.hpp"
 #include "io/file_manager.hpp"
+#include "items/powerup_manager.hpp"
 #include "graphics/irr_driver.hpp"
 #include "karts/abstract_kart_animation.hpp"
 #include "karts/kart_model.hpp"
@@ -31,6 +32,7 @@
 #include "network/network_config.hpp"
 #include "network/network_string.hpp"
 #include "network/protocols/game_events_protocol.hpp"
+#include "network/protocols/server_lobby.hpp"
 #include "network/stk_host.hpp"
 #include "network/stk_peer.hpp"
 #include "physics/physics.hpp"
@@ -270,8 +272,10 @@ SoccerWorld::~SoccerWorld()
 /** Initializes the soccer world. It sets up the data structure
  *  to keep track of points etc. for each kart.
  */
+int once = 1;
 void SoccerWorld::init()
 {
+    once = 1;
     m_kart_team_map.clear();
     m_kart_position_map.clear();
     WorldWithRank::init();
@@ -602,6 +606,15 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         kart->getBody()->setAngularVelocity(Vec3(0.0f));
         m_goal_transforms[i] = kart->getBody()->getWorldTransform();
     }
+
+if(abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 5 && once == 1)
+    {
+    set_powerup_multiplier(3);
+    auto sl = LobbyProtocol::get<ServerLobby>();
+    sl->send_message("Powerupper on (automatically)");
+    once = 2;
+    }
+
 }   // onCheckGoalTriggered
 
 //-----------------------------------------------------------------------------
@@ -956,6 +969,7 @@ btTransform SoccerWorld::getRescueTransform(unsigned int rescue_pos) const
 {
     if (!Track::getCurrentTrack()->hasNavMesh())
         return WorldWithRank::getRescueTransform(rescue_pos);
+
     const Vec3 &xyz = Graph::get()->getQuad(rescue_pos)->getCenter();
     const Vec3 &normal = Graph::get()->getQuad(rescue_pos)->getNormal();
     btTransform pos;
@@ -988,6 +1002,7 @@ btTransform SoccerWorld::getRescueTransform(unsigned int rescue_pos) const
 
     return pos;
 }   // getRescueTransform
+
 //-----------------------------------------------------------------------------
 void SoccerWorld::enterRaceOverState()
 {
