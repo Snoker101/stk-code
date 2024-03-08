@@ -71,28 +71,21 @@
 #include <vector>
 #include <ctime>
 #include <cstdlib>
+#include <unordered_map>
 
   // List of joining messages
 const std::vector<std::string> JOINED_MESSAGES = {
-    "Welcome aboard, keyboard lord!",
-    "Ahoy there, gaming bear!",
-    "Join the fun, little bun!",
-    "Enter the arena, brave hyena!",
-    "Glad you're here, gaming deer!",
-    "Welcome to the crew, kangaroo!",
-    "Join the fray, gaming jay!",
-    "Let's roll, gaming mole!",
-    "Game on, marathon python!",
-    "Welcome to the game zone, sly raccoon!",
-    "Into the spotlight, gaming knight!",
-    "Gaming feast, mighty beast!",
-    "Join the gaming spree, bumblebee!",
-    "Welcome to the club, gaming cub!",
-    "Into the gaming lair, dashing hare!",
-    "Welcome to the team, gaming dream!",
-    "Make some waves, gaming braves!",
-    "Welcome, controller conqueror!",
-    "Get this party started, gaming-hearted!"
+    "landed!",
+    "arrived!",
+    "dropped in!",
+    "got here!",
+    "rolled in!",
+    "showed up!",
+    "touched down!",
+    "appeared!",
+    "got in!",
+    "turned up!",
+    "disembarked!"
 };
 
 const std::vector<std::string> LEFT_MESSAGES = {
@@ -111,7 +104,7 @@ const std::vector<std::string> LEFT_MESSAGES = {
     "Gotta be flyin, dandelion!",
     "Time to go, buffalo!",
     "Take care, teddy bear!",
-    "Cant stay, blue jay!",
+    "Cant stay, blue jay!",
     "That's the tale, nightingale!",
     "Too-da-loo, kangaroo!",
     "Out the door, dinosaur!",
@@ -181,6 +174,39 @@ void removeName(std::string playerName){
 
     return;
 }
+// Create arrays for team names
+  std::vector<std::string> redteam;
+  std::vector<std::string> blueteam;
+
+struct Player {
+    std::string name;
+    int rank;
+    int score;
+};
+
+std::pair<int, int> getPlayerInfo(std::string playerName) {
+    std::vector<Player> players;
+    std::ifstream file("soccer_scores.txt");
+    std::string line;
+    while(std::getline(file, line)){
+        std::istringstream iss(line);
+        int rank;
+        std::string name;
+        int score;
+        if(!(iss >> rank >> name >> score)) { continue; }
+        players.push_back(Player{name, rank, score});
+    }
+    file.close();
+
+    for(const auto& player : players) {
+        if(player.name == playerName) {
+            return {player.rank, player.score};
+        }
+    }
+
+    return {-1, -1};  // return {-1, -1} if player not found
+}
+
 
 int ServerLobby::m_fixed_laps = -1;
 unsigned int playerlimit = 10;
@@ -747,6 +773,7 @@ void ServerLobby::updateAddons()
  */
 void ServerLobby::updateTracksForMode()
 {
+
     auto all_t = track_manager->getAllTrackIdentifiers();
     if (all_t.size() >= 65536)
         all_t.resize(65535);
@@ -823,22 +850,22 @@ void ServerLobby::updateTracksForMode()
     lastJoinedName = "";
     lastLeftName = "";
 
-    if (!powerupper_mode_on())
-                {
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-                std::string msg = "\u26A0\uFE0F Powerupper mode is off. Vote \"/powerupper on\" to turn it on.";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                auto peers = STKHost::get()->getPeers();
-            for (auto& p : peers) {
-                p->sendPacket(chat, true /* reliable */);
-            }
-                delete chat;
+   // if (!powerupper_mode_on())
+   //            {
+   //             NetworkString* chat = getNetworkString();
+   //             chat->addUInt8(LE_CHAT);
+   //             chat->setSynchronous(true);
+   //             std::string msg = "\u26A0\uFE0F Powerupper mode is off. Vote \"/powerupper on\" to turn it on.";
+   //             chat->encodeString16(StringUtils::utf8ToWide(msg));
+   //             auto peers = STKHost::get()->getPeers();
+   //         for (auto& p : peers) {
+   //             p->sendPacket(chat, true /* reliable */);
+   //         }
+   //             delete chat;
 
-                }
+   //             }
 
-    if (!jump_mode_on())
+/*    if (!jump_mode_on())
     {
         NetworkString* chat = getNetworkString();
         chat->addUInt8(LE_CHAT);
@@ -847,11 +874,11 @@ void ServerLobby::updateTracksForMode()
         chat->encodeString16(StringUtils::utf8ToWide(msg));
         auto peers = STKHost::get()->getPeers();
         for (auto& p : peers) {
-            p->sendPacket(chat, true /* reliable */);
+            p->sendPacket(chat, true);
         }
         delete chat;
     }
-
+*/
 }   // updateTracksForMode
 
 //-----------------------------------------------------------------------------
@@ -1742,8 +1769,8 @@ void ServerLobby::asynchronousUpdate()
         PeerVote winner_vote;
         m_winner_peer_id = std::numeric_limits<uint32_t>::max();
         bool go_on_race = false;
-        if (ServerConfig::m_track_voting)
-            go_on_race = handleAllVotes(&winner_vote, &m_winner_peer_id);
+       if (ServerConfig::m_track_voting)
+                go_on_race = handleAllVotes(&winner_vote, &m_winner_peer_id);
         else if (m_game_setup->isGrandPrixStarted() || isVotingOver())
         {
             winner_vote = *m_default_vote;
@@ -2883,6 +2910,22 @@ void ServerLobby::startSelection(const Event *event)
 
     // Will be changed after the first vote received
     m_timeout.store(std::numeric_limits<int64_t>::max());
+
+     // Loop through all peers and add to team arrays
+  for (auto& peer : STKHost::get()->getPeers()) {
+    if (!peer->isValidated())
+      continue;
+
+    for (auto& player : peer->getPlayerProfiles()) {
+      if(player->getTeam() == KART_TEAM_RED) {
+        redteam.push_back(StringUtils::wideToUtf8(player->getName()));
+      }
+      else if(player->getTeam() == KART_TEAM_BLUE) {
+        blueteam.push_back(StringUtils::wideToUtf8(player->getName()));
+      }
+    }
+  }
+
 }   // startSelection
 
 //-----------------------------------------------------------------------------
@@ -3025,11 +3068,13 @@ void ServerLobby::checkRaceFinished(bool endnow)
     assert(RaceEventManager::get()->isRunning());
     assert(World::getWorld());
     if(!endnow)
-    	if (!RaceEventManager::get()->isRaceOver()) return;
+        if (!RaceEventManager::get()->isRaceOver()) return;
 
     Log::info("ServerLobby", "The game is considered finished.");
     // notify the network world that it is stopped
     RaceEventManager::get()->stop();
+
+    set_powerup_multiplier(1); // turn off powerupper mode
 
     // stop race protocols before going back to lobby (end race)
     RaceEventManager::get()->getProtocol()->requestTerminate();
@@ -3093,6 +3138,106 @@ void ServerLobby::checkRaceFinished(bool endnow)
         submitRankingsToAddons();
     }
     m_state.store(WAIT_FOR_RACE_STOPPED);
+
+// After the match ends
+SoccerWorld* sw = dynamic_cast<SoccerWorld*>(World::getWorld());
+
+struct Player {
+    std::string name;
+    int rank;
+    int score;
+};
+
+std::vector<Player> playerScores;  // Vector to hold playerName, rank, and score
+
+// Read existing scores from the file
+std::ifstream scores_file("soccer_scores.txt");
+std::string line;
+while (std::getline(scores_file, line)) {
+    std::istringstream iss(line);
+    std::string existing_name;
+    int existing_rank, existing_score;
+    if (!(iss >> existing_rank >> existing_name >> existing_score)) { continue; } // Enhanced error checking
+    playerScores.push_back(Player{existing_name, existing_rank, existing_score});
+}
+scores_file.close();
+
+int last_rank = 2;
+int rank1_score = 1;
+if (!playerScores.empty())  // check if the vector is not empty
+{
+    rank1_score = playerScores.front().score;  // score of the first player
+    last_rank = playerScores.back().rank;  // rank of the last player
+    if (last_rank == 1) last_rank =2;
+}
+
+// calculate a & b
+float a = (std::max(2.0f,rank1_score/50.0f) - 1) /(last_rank - 1);
+float b = 1 - a;
+
+// Update scores
+for (unsigned i = 0; i < sw->getNumKarts(); i++) {
+    const RemoteKartInfo& rki = RaceManager::get()->getKartInfo(i);
+    std::string name = StringUtils::wideToUtf8(rki.getPlayerName());
+
+    KartTeam team = sw->getKartTeam(i);
+    int team_scored = sw->getScore(team);
+    KartTeam opposing_team = (team == KART_TEAM_RED) ? KART_TEAM_BLUE : KART_TEAM_RED;
+    int team_received = (sw->getScore(opposing_team));
+    int score = std::max(0, team_scored - team_received);
+
+    bool foundPlayer = false;
+
+    if ((team == KART_TEAM_RED && std::find(redteam.begin(), redteam.end(), name) != redteam.end()) ||
+    (team == KART_TEAM_BLUE && std::find(blueteam.begin(), blueteam.end(), name) != blueteam.end())) {
+        for (auto& savedPlayer : playerScores) {
+            if (savedPlayer.name == name) {
+                savedPlayer.score += score*(a*savedPlayer.rank+b); // Update player's score
+                foundPlayer = true;
+                break;
+            }
+        }
+
+        if (!foundPlayer) {
+            // Add new player
+            playerScores.push_back(Player{name, 0, score});
+        }
+    }
+}
+
+
+// Sort players by score in descending order
+std::sort(playerScores.begin(), playerScores.end(), [](const Player& a, const Player& b) {
+  return a.score > b.score;
+});
+
+// Write updated scores and ranks back to the file
+int total_players = STKHost::get()->getPlayersInGame(); // Get the total number of players
+std::ofstream outfile2("debug.txt");
+outfile2 << total_players ;
+if(total_players > 2 ){
+
+std::ofstream outfile("soccer_scores.txt");
+
+int rank = 0, lastScore = -1;
+
+for (auto& player : playerScores) {
+    if (player.score > 0) {  // Only consider games with more than 1 player and scores that are more than zero
+        if (player.score != lastScore) {
+            rank++;
+            lastScore = player.score;
+        }
+        outfile << rank << " " << player.name << " " << player.score << "\n"; // Write rank, player name, and score
+    }
+}
+outfile.close();
+}
+outfile2.close();
+// Clear team vectors at the end
+redteam.clear();
+blueteam.clear();
+
+
 }   // checkRaceFinished
 
 //-----------------------------------------------------------------------------
@@ -3483,6 +3628,8 @@ void ServerLobby::clientDisconnected(Event* event)
     if (players_on_peer.empty())
         return;
 
+
+
     NetworkString* msg = getNetworkString(2);
     const bool waiting_peer_disconnected =
         event->getPeer()->isWaitingForGame();
@@ -3513,22 +3660,22 @@ void ServerLobby::clientDisconnected(Event* event)
             for (auto p : players_on_peer)
     {
 std::string peerName = StringUtils::wideToUtf8(p->getName());
-if (peerName != lastLeftName) {
-NetworkString* chat = getNetworkString();
-            chat->addUInt8(LE_CHAT);
-            chat->setSynchronous(true);
-            std::string msg = "\U0001f6eb " + peerName + " disconnected! "+generateRandomMessage(LEFT_MESSAGES);
-            chat->encodeString16(StringUtils::utf8ToWide(msg));
+//if (peerName != lastLeftName) {
+//NetworkString* chat = getNetworkString();
+//            chat->addUInt8(LE_CHAT);
+ //           chat->setSynchronous(true);
+ //           std::string msg = "\U0001f6eb " + peerName + " disconnected! "+generateRandomMessage(LEFT_MESSAGES);
+ //           chat->encodeString16(StringUtils::utf8ToWide(msg));
 
-            // Update lastLeftName
-            lastLeftName = peerName;
+ //           // Update lastLeftName
+ //           lastLeftName = peerName;
 
-            auto peers = STKHost::get()->getPeers();
-            for (auto& p : peers) {
-                p->sendPacket(chat, true /* reliable */);
-            }
-            delete chat;
-}
+  //          auto peers = STKHost::get()->getPeers();
+  //          for (auto& p : peers) {
+  //              p->sendPacket(chat, true /* reliable */);
+  //          }
+ //           delete chat;
+//}
             removeName(peerName); //remove peer votings
 
             //update voting result
@@ -3612,9 +3759,9 @@ NetworkString* chat = getNetworkString();
 
             if (peers.size() < 1) //turn on powerupper mode and jump mode if everyone left
             {
-                 std::ofstream outfile("powerupper.txt");
-                    outfile << "3 20\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)";
-                    outfile.close();
+              //   std::ofstream outfile("powerupper.txt");
+                //    outfile << "3 20\nThe first value represents the number of powerups the losing team gets (1 for default), while second value represents the nitro value the losing team gets (0 for default)";
+                  //  outfile.close();
 
                    std::ofstream outfile2("jumplimit.txt");
                     outfile2 << "70\nThis value represents the maximum jump height the kart can reach before further jumping is disabled";
@@ -3931,6 +4078,8 @@ void ServerLobby::connectionRequested(Event* event)
         return;
     }
 
+
+
     if (ServerConfig::m_ai_handling && peer->isAIPeer())
         m_ai_peer = peer;
 
@@ -4040,6 +4189,9 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
             name = L"unnamed";
         else if (name.size() > 30)
             name = name.subString(0, 30);
+        // Check if player's name is "Snoker" and set country code to "LB"
+        if (online_name == L"Snoker")
+            country_code = "LB";
         float default_kart_color = data.getFloat();
         HandicapLevel handicap = (HandicapLevel)data.getUInt8();
         auto player = std::make_shared<NetworkPlayerProfile>
@@ -4304,7 +4456,30 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
         .addUInt8((uint8_t)all_profiles.size());
     for (auto profile : all_profiles)
     {
+
         auto profile_name = profile->getName();
+
+         const wchar_t* profile_name_wide_cstr = profile_name.c_str();
+
+        // Allocate a buffer for the std::string.
+        std::size_t buffer_size = std::wcsrtombs(nullptr, &profile_name_wide_cstr, 0, nullptr);
+        if (buffer_size == static_cast<std::size_t>(-1)) {
+            // Handle the error.
+            return;
+        }
+        std::string profile_name_for_rank(buffer_size, '\0');
+
+        // Convert the const wchar_t* to a std::string.
+        std::wcsrtombs(&profile_name_for_rank[0], &profile_name_wide_cstr, buffer_size, nullptr);
+
+        // Add medal ranking
+        if(getPlayerInfo(profile_name_for_rank).first == 1)
+            profile_name = StringUtils::utf32ToWide({ 0x1F947 }) + profile_name;
+        else if (getPlayerInfo(profile_name_for_rank).first == 2)
+            profile_name = StringUtils::utf32ToWide({ 0x1F948 }) + profile_name;
+        else if (getPlayerInfo(profile_name_for_rank).first == 3)
+            profile_name = StringUtils::utf32ToWide({ 0x1F949 }) + profile_name;
+
          // Add a Cedar tree emoji if the player's name is "Cedar"
         if (profile_name == L"Cedar")
             profile_name += irr::core::stringw(L" ") + StringUtils::utf32ToWide({ 0x0001F1F1, 0x0001F1E7 });
@@ -4835,7 +5010,7 @@ bool ServerLobby::decryptConnectionRequest(std::shared_ptr<STKPeer> peer,
     uint32_t online_id, const core::stringw& online_name,
     const std::string& country_code)
 {
-	SoccerWorld* sw = (SoccerWorld*)World::getWorld();
+        SoccerWorld* sw = (SoccerWorld*)World::getWorld();
 
     auto crypto = std::unique_ptr<Crypto>(new Crypto(
         Crypto::decode64(key), Crypto::decode64(iv)));
@@ -4852,7 +5027,7 @@ bool ServerLobby::decryptConnectionRequest(std::shared_ptr<STKPeer> peer,
                 NetworkString* chat = getNetworkString();
                 chat->addUInt8(LE_CHAT);
                 chat->setSynchronous(true);
-                std::string msg = "\U0001f6ec " + peerName + " is here! "+generateRandomMessage(JOINED_MESSAGES);
+                std::string msg = "\U0001f6ec " + peerName + " "+generateRandomMessage(JOINED_MESSAGES);
                 chat->encodeString16(StringUtils::utf8ToWide(msg));
                 auto peers = STKHost::get()->getPeers();
                 for (auto& p : peers) {
@@ -4868,26 +5043,26 @@ bool ServerLobby::decryptConnectionRequest(std::shared_ptr<STKPeer> peer,
         if (m_state.load() == RACING){
         const int red_score = sw->getScore(KART_TEAM_RED);
         const int blue_score = sw->getScore(KART_TEAM_BLUE);
-	std::string msg = "\nScore:\n\U0001f7e5 Red " + std::to_string(red_score)+ " : " + std::to_string(blue_score) + " Blue \U0001f7e6\n";
+        std::string msg = "\nScore:\n\U0001f7e5 Red " + std::to_string(red_score)+ " : " + std::to_string(blue_score) + " Blue \U0001f7e6\n";
         NetworkString* chat = getNetworkString();
         chat->addUInt8(LE_CHAT);
         chat->setSynchronous(true);
-	chat->encodeString16(StringUtils::utf8ToWide(msg));
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
         peer->sendPacket(chat, true/*reliable*/);
         delete chat;
 
     }
-    if (!powerupper_mode_on())
-                {
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-                std::string msg = "\u26A0\uFE0F Powerupper mode is off. Vote \"/powerupper on\" to turn it on.";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                peer->sendPacket(chat, true /* reliable */);
-                delete chat;
+   // if (!powerupper_mode_on())
+     //           {
+     //           NetworkString* chat = getNetworkString();
+     //           chat->addUInt8(LE_CHAT);
+     //           chat->setSynchronous(true);
+     //           std::string msg = "\u26A0\uFE0F Powerupper mode is off. Vote \"/powerupper on\" to turn it on.";
+     //           chat->encodeString16(StringUtils::utf8ToWide(msg));
+     //           peer->sendPacket(chat, true /* reliable */);
+     //           delete chat;
 
-                }
+     //           }
 
     if (!jump_mode_on())
     {
@@ -5967,6 +6142,9 @@ bool ServerLobby::checkPeersReady(bool ignore_ai_peer) const
         auto peer = p.first.lock();
         if (!peer)
             continue;
+         // Add check for always spectating
+        if (peer->alwaysSpectate())
+            continue;
         if (ignore_ai_peer && peer->isAIPeer())
             continue;
         all_ready = all_ready && p.second;
@@ -6167,6 +6345,77 @@ void ServerLobby::handleServerCommand(Event* event,
     }
 }
 
+else if (argv[0] == "rank")
+{
+    if (argv.size() < 2) {
+
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "Usage: /rank [Player name]";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        peer->sendPacket(chat, true/*reliable*/);
+        delete chat;
+        return;
+
+        }
+    else {
+        auto rank = getPlayerInfo(argv[1]);
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "No ranking found for this Player!";
+        if (rank.first != -1)
+        msg = argv[1]+" is ranked "+std::to_string(rank.first)+" with score "+std::to_string(rank.second) ;
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        peer->sendPacket(chat, true /* reliable */);
+        delete chat;
+    }
+
+}
+
+
+else if (argv[0] == "top")
+{
+    // Parse the count 'n' from the command - set to 8 if not provided
+    int count = (argv.size() > 1) ? std::stoi(argv[1]) : 8;
+
+    // Create a vector of tuples
+    std::vector<std::tuple<int, std::string, int>> players;
+
+    // Read from the soccer_scores.txt file
+    std::ifstream file("soccer_scores.txt");
+    std::string line;
+    int i =0;
+    while(std::getline(file, line) && i<count){
+        std::istringstream iss(line);
+        int rank;
+        std::string name;
+        int score;
+        if(!(iss >> rank >> name >> score)) { continue; }
+        players.push_back(std::make_tuple(rank, name, score));
+        i++;
+    }
+    file.close();
+
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+    std::string msg = "Rank        Player        Score\n";
+
+    // Loop through the top 'n' scores
+    for (const auto& player : players) {
+        msg += "  #" + std::to_string(std::get<0>(player)) + "             ";
+        msg += std::get<1>(player) + "            ";
+        msg += std::to_string(std::get<2>(player)) + "\n";
+    }
+
+    chat->encodeString16(StringUtils::utf8ToWide(msg));
+    peer->sendPacket(chat, true /* reliable */);
+    delete chat;
+}
+
+
 else if (argv[0] == "powerupper")
 {
     if ((argv.size() < 2) || (argv.size() >3))
@@ -6330,7 +6579,17 @@ else if (argv[0] == "powerupper")
                 chat->setSynchronous(true);
 
                 std::string name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
-                if (std::find(powerupper_off.begin(), powerupper_off.end(), name) == powerupper_off.end())
+                if (std::find(powerupper_off.begin(), powerupper_off.end(), name) != powerupper_off.end()) {
+                    // Name is already in powerupper_off
+                    NetworkString* chat = getNetworkString();
+                    chat->addUInt8(LE_CHAT);
+                    chat->setSynchronous(true);
+                    std::string msg = "\u26A0\uFE0F You've already voted \u26A0\uFE0F";
+                    chat->encodeString16(StringUtils::utf8ToWide(msg));
+                    peer->sendPacket(chat, true/*reliable*/);
+                    delete chat;
+                    return;
+                        }
                     powerupper_off.push_back(name);
                 std::string msg;
                  if (powerupper_off.size() == 1)
@@ -6372,224 +6631,6 @@ else if (argv[0] == "powerupper")
                 chat->addUInt8(LE_CHAT);
                 chat->setSynchronous(true);
                 std::string msg = "Invalid state parameter. Usage: /powerupper [on|off]";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                peer->sendPacket(chat, true/*reliable*/);
-                delete chat;
-                return;
-            }
-        }
-
-}
-}
-
-
-else if (argv[0] == "jump")
-{
-    if ((argv.size() < 2) || (argv.size() >3))
-    {
-        NetworkString* chat = getNetworkString();
-        chat->addUInt8(LE_CHAT);
-        chat->setSynchronous(true);
-        std::string msg = "Usage: /jump [on|off]";
-        chat->encodeString16(StringUtils::utf8ToWide(msg));
-        peer->sendPacket(chat, true/*reliable*/);
-        delete chat;
-        return;
-    }
-    else {
-        // Read the admin password from a file
-        std::ifstream infile("admin_password.txt");
-        std::string password;
-        if (infile.good()) {
-            infile >> password;
-        }
-        else {
-            // Generate a random password and save it to the file
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::uniform_int_distribution<> distrib(1000, 9999);
-            password = std::to_string(distrib(gen));
-            std::ofstream outfile("admin_password.txt");
-            outfile << password;
-            outfile.close();
-        }
-
-        // Check if the password matches
-        if ((!argv[2].empty()) && (password == argv[2])) {
-            if (argv[1] == "on") {
-                std::ofstream outfile("jumplimit.txt");
-                outfile << "70\nThis value represents the maximum jump height the kart can reach before further jumping is disabled";
-                outfile.close();
-                set_jump_limit(70.0);
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-                std::string msg = "Jump mode enabled \U0001f7e2";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                auto peers = STKHost::get()->getPeers();
-            for (auto& p : peers) {
-                p->sendPacket(chat, true /* reliable */);
-            }
-                delete chat;
-                jump_off.clear();
-                jump_on.clear();
-            }
-            else if (argv[1] == "off") {
-                std::ofstream outfile("jumplimit.txt");
-                outfile << "0\nThis value represents the maximum jump height the kart can reach before further jumping is disabled)";
-                outfile.close();
-                set_jump_limit(0.0);
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-                std::string msg = "Jump mode disabled \U0001f534";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                auto peers = STKHost::get()->getPeers();
-            for (auto& p : peers) {
-                p->sendPacket(chat, true /* reliable */);
-            }
-                delete chat;
-            }
-            else {
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-                std::string msg = "Invalid state parameter. Usage: /jump [on|off]";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                peer->sendPacket(chat, true/*reliable*/);
-                delete chat;
-                return;
-            }
-        }
-
-                else if ((argv.size() > 2) && (password != argv[2]))
-        {
-            NetworkString* chat = getNetworkString();
-            chat->addUInt8(LE_CHAT);
-            chat->setSynchronous(true);
-            std::string msg = "Incorrect password";
-            chat->encodeString16(StringUtils::utf8ToWide(msg));
-            peer->sendPacket(chat, true/*reliable*/);
-            delete chat;
-            return;
-        }
-
-        if (argv.size() == 2) {
-            if (argv[1] == "on") {
-                if (jump_mode_on())
-                {
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-                std::string msg = "\u26A0\uFE0F Jump mode is already on \u26A0\uFE0F";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                peer->sendPacket(chat, true/*reliable*/);
-                delete chat;
-                return;
-                }
-                else{
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-
-                std::string name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
-                if (std::find(jump_on.begin(), jump_on.end(), name) == jump_on.end())
-                    jump_on.push_back(name);
-
-                std::string msg;
-                 if (jump_on.size() == 1)
-                    msg = "\U0001f5f3\uFE0F "+name +" voted /jump on. There is "+ std::to_string(jump_on.size())+" such vote";
-                else
-                msg = "\U0001f5f3\uFE0F "+name +" voted /jump on. There are "+ std::to_string(jump_on.size())+" such votes";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                auto peers = STKHost::get()->getPeers();
-                for (auto& p : peers) {
-                    p->sendPacket(chat, true /* reliable */);
-                }
-                delete chat;
-
-                if (jump_on.size() > peers.size()/2){
-                    jump_off.clear();
-                    jump_on.clear();
-                    std::ofstream outfile("jumplimit.txt");
-                    outfile << "70\nThis value represents the maximum jump height the kart can reach before further jumping is disabled";
-                    outfile.close();
-                    set_jump_limit(70.0);
-                    NetworkString* chat = getNetworkString();
-                    chat->addUInt8(LE_CHAT);
-                    chat->setSynchronous(true);
-                    std::string msg = "Jump mode enabled \U0001f7e2";
-                    chat->encodeString16(StringUtils::utf8ToWide(msg));
-                    auto peers = STKHost::get()->getPeers();
-                for (auto& p : peers) {
-                    p->sendPacket(chat, true /* reliable */);
-                }
-                    delete chat;
-                    }
-            }
-
-            }
-            else if (argv[1] == "off") {
-                if (!jump_mode_on())
-                {
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-                std::string msg = "\u26A0\uFE0F Jump mode is already off \u26A0\uFE0F";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                peer->sendPacket(chat, true/*reliable*/);
-                delete chat;
-                return;
-                }
-                else{
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-
-                std::string name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
-                if (std::find(jump_off.begin(), jump_off.end(), name) == jump_off.end())
-                    jump_off.push_back(name);
-
-                std::string msg;
-                 if (jump_off.size() == 1)
-                    msg = "\U0001f5f3\uFE0F "+name +" voted /jump off. There is "+ std::to_string(jump_off.size())+" such vote";
-                else
-                    msg = "\U0001f5f3\uFE0F "+name +" voted /jump off. There are "+ std::to_string(jump_off.size())+" such votes";
-                    chat->encodeString16(StringUtils::utf8ToWide(msg));
-            auto peers = STKHost::get()->getPeers();
-            for (auto& p : peers) {
-                p->sendPacket(chat, true /* reliable */);
-            }
-            delete chat;
-
-            if (jump_off.size() > peers.size()/2)
-            {
-                powerupper_off.clear();
-                jump_on.clear();
-                std::ofstream outfile("jumplimit.txt");
-                outfile << "0\nThis value represents the maximum jump height the kart can reach before further jumping is disabled";
-                outfile.close();
-                set_jump_limit(0.0);
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-                std::string msg = "Jump mode disabled \U0001f534";
-                chat->encodeString16(StringUtils::utf8ToWide(msg));
-                auto peers = STKHost::get()->getPeers();
-            for (auto& p : peers) {
-                p->sendPacket(chat, true /* reliable */);
-            }
-                delete chat;
-                }
-
-            }
-
-            }
-            else {
-                NetworkString* chat = getNetworkString();
-                chat->addUInt8(LE_CHAT);
-                chat->setSynchronous(true);
-                std::string msg = "Invalid state parameter. Usage: /jump [on|off]";
                 chat->encodeString16(StringUtils::utf8ToWide(msg));
                 peer->sendPacket(chat, true/*reliable*/);
                 delete chat;
@@ -6721,6 +6762,34 @@ else if ((argv[0] == "changeteam") || (argv[0] == "ct"))
         new_file << "Help content is currently unavialable. Ask the owner to add it."; // write content to file
         new_file.close(); // close file
         file.open("help.txt"); // reopen file to read content
+    }
+
+    buffer << file.rdbuf();
+    std::string msg = buffer.str();
+
+    chat->encodeString16(StringUtils::utf8ToWide(msg));
+    peer->sendPacket(chat, true/*reliable*/);
+
+    file.close(); // close the file
+    delete chat;
+    return;
+    }
+
+    else if (argv[0] == "new")
+    {
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+
+    std::ifstream file("new.txt");
+    std::stringstream buffer;
+
+    if (!file.is_open()) // check if file is not found
+    {
+        std::ofstream new_file("new.txt"); // create new file
+        new_file << "new content is currently unavialable. Ask the owner to add it."; // write content to file
+        new_file.close(); // close file
+        file.open("new.txt"); // reopen file to read content
     }
 
     buffer << file.rdbuf();
@@ -7092,6 +7161,10 @@ unmute_error:
         peer->sendPacket(error, true/*reliable*/);
         delete error;
     }
+    else if (argv[0] == "hi")
+    {
+        send_message("Server:hello");
+    }
     else if (argv[0] == "listmute")
     {
         NetworkString* chat = getNetworkString();
@@ -7125,3 +7198,17 @@ unmute_error:
         delete chat;
     }
 }   // handleServerCommand
+
+void ServerLobby::send_message(std::string msg)
+{
+
+NetworkString* chat = getNetworkString();
+chat->addUInt8(LE_CHAT);
+chat->setSynchronous(true);
+chat->encodeString16(StringUtils::utf8ToWide(msg));
+auto peers = STKHost::get()->getPeers();
+for (auto& p : peers)
+    p->sendPacket(chat, true /* reliable */);
+delete chat;
+
+}
