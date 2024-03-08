@@ -97,7 +97,7 @@ void Skidding::reset()
  *  state). Similarly m_real_steering is output of updateRewind() and will be
  *  recomputed every frame when update() is called, and similar for
  *  m_skid_bonus_ready
- *  \param buffer Buffer for the state information. 
+ *  \param buffer Buffer for the state information.
  */
 void Skidding::saveState(BareNetworkString *buffer)
 {
@@ -109,7 +109,7 @@ void Skidding::saveState(BareNetworkString *buffer)
 
 // ----------------------------------------------------------------------------
 /** Restores the skidding state of a kart.
- *  \param buffer Buffer with state information. 
+ *  \param buffer Buffer with state information.
  */
 void Skidding::rewindTo(BareNetworkString *buffer)
 {
@@ -209,13 +209,6 @@ float Skidding::updateSteering(float steer, int ticks)
         }   // case SKID_ACCUMULATE_LEFT
 
     }   // switch m_skid_state
-
-    // A visual rotation outside of [-1, 1] bounds leads to severe graphical errors
-    // This allows the "reduce-turn-max" parameter for skidding to be set arbitrarily.
-    if (m_visual_rotation > 1.0f)
-        m_visual_rotation = 1.0f;
-    if (m_visual_rotation < -1.0f)
-        m_visual_rotation = -1.0f;
 
     return steer_result;
 }   // updateSteering
@@ -514,6 +507,7 @@ void Skidding::update(int ticks, bool is_on_ground,
                 v.setZ(v.getZ()*r);
                 m_kart->getBody()->setLinearVelocity(v);
 
+
             }
 
             m_actual_curve->addPoint(m_kart->getXYZ());
@@ -526,6 +520,8 @@ void Skidding::update(int ticks, bool is_on_ground,
             float bonus_time, bonus_speed, bonus_force;
             unsigned int level = getSkidBonus(&bonus_time, &bonus_speed,
                                               &bonus_force);
+            if (m_kart->getEnergy() <= 10.0)
+            m_kart->setEnergy(m_kart->getEnergy()+0.01f);
 
             if (level >= 1 && !(level == 0 && m_remaining_jump_time <= 0.0f))
             {
