@@ -73,6 +73,8 @@
 #include <cstdlib>
 #include <unordered_map>
 
+std::vector<std::string> tips; // vector to store the tips
+std::string random_tip = "no tips for today, enjoy!";
   // List of joining messages
 const std::vector<std::string> JOINED_MESSAGES = {
     "landed!",
@@ -773,7 +775,7 @@ void ServerLobby::updateAddons()
  */
 void ServerLobby::updateTracksForMode()
 {
-
+    set_powerup_multiplier(1);
     auto all_t = track_manager->getAllTrackIdentifiers();
     if (all_t.size() >= 65536)
         all_t.resize(65535);
@@ -879,6 +881,43 @@ void ServerLobby::updateTracksForMode()
         delete chat;
     }
 */
+
+// Read tips from the file
+std::ifstream file("tips.txt");
+if (file.is_open())
+{
+    std::string tip;
+    while (std::getline(file, tip))
+    {
+        tips.push_back(tip);
+    }
+    file.close();
+}
+else
+{
+    Log::warn("ServerLobby", "tips.txt file not found, creating it with sample tips");
+
+    // Create the file with sample tips
+    std::ofstream new_file("tips.txt");
+    new_file << "Practice your drifting skills to get better at corners." << std::endl;
+    new_file << "Use nitro wisely, don't burn it all at once." << std::endl;
+    new_file << "Collect nitro bottles for a speed boost." << std::endl;
+    new_file << "Use bananas and other projectiles to slow down opponents." << std::endl;
+    new_file << "Pay attention to the mini-map to plan your route." << std::endl;
+    new_file.close();
+
+    // Read the newly created file
+    std::ifstream new_file_read("tips.txt");
+    std::string tip;
+    while (std::getline(new_file_read, tip))
+    {
+        tips.push_back(tip);
+    }
+    new_file_read.close();
+}
+
+random_tip = generateRandomMessage(tips);
+
 }   // updateTracksForMode
 
 //-----------------------------------------------------------------------------
@@ -1049,6 +1088,7 @@ void ServerLobby::handleChat(Event* event)
         delete chat;
     }
 }   // handleChat
+
 //-----------------------------------------------------------------------------
 void ServerLobby::changeTeam(Event* event)
 {
@@ -4937,6 +4977,16 @@ void ServerLobby::finishedLoadingWorldClient(Event *event)
     m_peers_ready.at(peer) = true;
     Log::info("ServerLobby", "Peer %d has finished loading world at %lf",
         peer->getHostId(), StkTime::getRealTime());
+
+    // Send a random tip when the peer finishes loading
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+    std::string msg = random_tip;
+    chat->encodeString16(StringUtils::utf8ToWide(msg));
+    peer->sendPacket(chat, true /* reliable */);
+    delete chat;
+
 }   // finishedLoadingWorldClient
 
 //-----------------------------------------------------------------------------
@@ -5064,7 +5114,7 @@ bool ServerLobby::decryptConnectionRequest(std::shared_ptr<STKPeer> peer,
 
      //           }
 
-    if (!jump_mode_on())
+   /* if (!jump_mode_on())
     {
         NetworkString* chat = getNetworkString();
         chat->addUInt8(LE_CHAT);
@@ -5072,9 +5122,9 @@ bool ServerLobby::decryptConnectionRequest(std::shared_ptr<STKPeer> peer,
         std::string msg = "\u26A0\uFE0F Jump mode is off. Vote \"/jump on\" to turn it on.";
         chat->encodeString16(StringUtils::utf8ToWide(msg));
         auto peers = STKHost::get()->getPeers();
-        peer->sendPacket(chat, true /* reliable */);
+        peer->sendPacket(chat, true );
         delete chat;
-    }
+    }*/
         return true;
     }
     return false;
@@ -6344,6 +6394,17 @@ void ServerLobby::handleServerCommand(Event* event,
         }
     }
 }
+else if (argv[0] == "tip")
+{
+// Send a random tip when the peer finishes loading
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+    std::string msg = generateRandomMessage(tips);
+    chat->encodeString16(StringUtils::utf8ToWide(msg));
+    peer->sendPacket(chat, true /* reliable */);
+    delete chat;
+}
 
 else if (argv[0] == "rank")
 {
@@ -6790,6 +6851,34 @@ else if ((argv[0] == "changeteam") || (argv[0] == "ct"))
         new_file << "new content is currently unavialable. Ask the owner to add it."; // write content to file
         new_file.close(); // close file
         file.open("new.txt"); // reopen file to read content
+    }
+
+    buffer << file.rdbuf();
+    std::string msg = buffer.str();
+
+    chat->encodeString16(StringUtils::utf8ToWide(msg));
+    peer->sendPacket(chat, true/*reliable*/);
+
+    file.close(); // close the file
+    delete chat;
+    return;
+    }
+
+    else if (argv[0] == "about")
+    {
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+
+    std::ifstream file("about.txt");
+    std::stringstream buffer;
+
+    if (!file.is_open()) // check if file is not found
+    {
+        std::ofstream new_file("about.txt"); // create new file
+        new_file << "about content is currently unavialable. Ask the owner to add it."; // write content to file
+        new_file.close(); // close file
+        file.open("about.txt"); // reopen file to read content
     }
 
     buffer << file.rdbuf();
