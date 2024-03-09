@@ -179,7 +179,7 @@ bool PlayerController::action(PlayerAction action, int value, bool dry_run)
 
     SoccerWorld *soccer_world = dynamic_cast<SoccerWorld*>(World::getWorld());
     float  kart_y, kart_x, kart_z,  ball_x, ball_y, ball_z, kart_vy, gball = 24.8, gkart = 31.9; // gravity;
-    double jump_time = StkTime::getRealTime();
+    //double jump_time = StkTime::getRealTime();
     Vec3 kartPos,ballPos,ballradius;
 
 #define SET_OR_TEST(var, value)                \
