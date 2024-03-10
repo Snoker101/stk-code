@@ -281,6 +281,8 @@ void SoccerWorld::init()
     WorldWithRank::init();
     m_display_rank = false;
     m_ball_hitter  = -1;
+    m_ball_hitter_red = -1;
+    m_ball_hitter_blue = -1;
     m_ball         = NULL;
     m_ball_body    = NULL;
     m_goal_target  = RaceManager::get()->getMaxGoal();
@@ -340,6 +342,8 @@ void SoccerWorld::reset(bool restart)
     m_red_scorers.clear();
     m_blue_scorers.clear();
     m_ball_hitter = -1;
+    m_ball_hitter_red = -1;
+    m_ball_hitter_blue = -1;
     m_red_kdm.clear();
     m_blue_kdm.clear();
     m_ball_heading = 0.0f;
@@ -507,6 +511,13 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
             m_goal_frame.push_back(m_frame_count - elapsed_frame);
         }
 
+        if (!isCorrectGoal(m_ball_hitter, first_goal))
+        {
+          KartTeam team = getKartTeam(m_ball_hitter);
+          if (team == KART_TEAM_RED && m_ball_hitter_blue != -1) m_ball_hitter = m_ball_hitter_blue;
+          else if (team == KART_TEAM_BLUE && m_ball_hitter_red != -1) m_ball_hitter = m_ball_hitter_red;
+        }
+
         ScorerData sd = {};
         sd.m_id = m_ball_hitter;
         sd.m_correct_goal = isCorrectGoal(m_ball_hitter, first_goal);
@@ -614,7 +625,8 @@ if((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 4) && (once == 1) &
     sl->send_message("Powerupper on (automatically)");
     once = 2;
     }
-
+m_ball_hitter_red = -1;
+m_ball_hitter_blue = -1;
 }   // onCheckGoalTriggered
 
 //-----------------------------------------------------------------------------
@@ -749,6 +761,10 @@ void SoccerWorld::resetKartsToSelfGoals()
 void SoccerWorld::setBallHitter(unsigned int kart_id)
 {
     m_ball_hitter = kart_id;
+    KartTeam team = getKartTeam(kart_id);
+    if (team == KART_TEAM_RED) m_ball_hitter_red = kart_id;
+    else m_ball_hitter_blue = kart_id;
+
 }   // setBallHitter
 
 //-----------------------------------------------------------------------------
@@ -872,7 +888,7 @@ int SoccerWorld::getBallNode() const
 //-----------------------------------------------------------------------------
 bool SoccerWorld::isCorrectGoal(unsigned int kart_id, bool first_goal) const
 {
-    KartTeam team = getKartTeam(kart_id);
+KartTeam team = getKartTeam(kart_id);
     if (first_goal)
     {
         if (team == KART_TEAM_RED)
