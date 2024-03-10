@@ -607,7 +607,7 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         m_goal_transforms[i] = kart->getBody()->getWorldTransform();
     }
 
-if(abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 5 && once == 1)
+if((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 4) && (once == 1) && (!isRaceOver()))
     {
     set_powerup_multiplier(3);
     auto sl = LobbyProtocol::get<ServerLobby>();
