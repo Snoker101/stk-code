@@ -2838,9 +2838,11 @@ void Kart::updateEnginePowerAndBrakes(int ticks)
         if(m_controls.getBrake())
         {   // check if the player is currently only slowing down
             // or moving backwards
+            int m = 3;
             if(m_speed > 0.0f)
             {   // Still going forward while braking
-                applyEngineForce(engine_power-braking_power*3);
+                if (m_controls.getNitro()) m = 5;
+                applyEngineForce(engine_power-braking_power*m);
                 m_brake_ticks += ticks;
                 // Apply the brakes - include the time dependent brake increase
                 float f = 1.0f + stk_config->ticks2Time(m_brake_ticks)
@@ -2858,7 +2860,8 @@ void Kart::updateEnginePowerAndBrakes(int ticks)
                     // The backwards acceleration is artificially increased to
                     // allow players to get "unstuck" quicker if they hit e.g.
                     // a wall.
-                    applyEngineForce(engine_power-braking_power*3);
+                    if (m_controls.getNitro()) m = 5;
+                    applyEngineForce(engine_power-braking_power*m-m*3+3*3);
                 }
                 else  // -m_speed >= max speed on this terrain
                 {
