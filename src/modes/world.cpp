@@ -129,8 +129,6 @@ World* World::m_world[PT_COUNT];
  */
 World::World() : WorldStatus()
 {
-    if (m_process_type == PT_MAIN)
-        GUIEngine::getDevice()->setResizable(true);
     RewindManager::setEnable(NetworkConfig::get()->isNetworking());
 #ifdef DEBUG
     m_magic_number = 0xB01D6543;
@@ -614,7 +612,6 @@ World::~World()
 {
     if (m_process_type == PT_MAIN)
     {
-        GUIEngine::getDevice()->setResizable(false);
         material_manager->unloadAllTextures();
     }
 
@@ -1024,9 +1021,11 @@ void World::updateWorld(int ticks)
     }
 
     // Don't update world if a menu is shown or the race is over.
-    if (getPhase() == FINISH_PHASE ||
-        (!NetworkConfig::get()->isNetworking() &&
-        getPhase() == IN_GAME_MENU_PHASE))
+    // Exceptions : - Networking (local pause doesn't affect the server or other players)
+    //              - Benchmarking (a pause would mess up measurements)
+    if ((getPhase() == FINISH_PHASE) ||
+        ((getPhase() == IN_GAME_MENU_PHASE) &&
+        (!NetworkConfig::get()->isNetworking() || !RaceManager::get()->isBenchmarking())))
         return;
 
     try
