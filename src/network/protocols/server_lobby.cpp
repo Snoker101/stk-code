@@ -72,6 +72,7 @@
 #include <ctime>
 #include <cstdlib>
 #include <unordered_map>
+#include <random>
 
 std::vector<std::string> tips; // vector to store the tips
 std::string random_tip = "no tips for today, enjoy!";
@@ -4240,6 +4241,10 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
             peer->getHostId(), default_kart_color, i == 0 ? online_id : 0,
             handicap, (uint8_t)i, KART_TEAM_NONE,
             country_code);
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> distr(0, 1);
+
         if (ServerConfig::m_team_choosing)
         {
             KartTeam cur_team = KART_TEAM_NONE;
@@ -4248,10 +4253,18 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
                 cur_team = KART_TEAM_BLUE;
                 red_blue.second++;
             }
-            else
+            else if (red_blue.first < red_blue.second)
             {
                 cur_team = KART_TEAM_RED;
                 red_blue.first++;
+            }
+            else
+            {
+                cur_team = distr(gen) ? KART_TEAM_RED : KART_TEAM_BLUE;
+                if (cur_team == KART_TEAM_RED)
+                    red_blue.first++;
+                else
+                    red_blue.second++;
             }
             player->setTeam(cur_team);
         }
