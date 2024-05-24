@@ -21,9 +21,9 @@
 #include "graphics/central_settings.hpp"
 #include "graphics/irr_driver.hpp"
 #include "io/file_manager.hpp"
-#include "race/race_manager.hpp"
-#include "replay/replay_play.hpp"
 #include "states_screens/dialogs/custom_video_settings.hpp"
+#include "states_screens/dialogs/recommend_video_settings.hpp"
+#include "utils/profiler.hpp"
 
 #ifndef SERVER_ONLY
 #include <ge_main.hpp>
@@ -130,6 +130,8 @@ void OptionsScreenVideo::initPresets()
 // --------------------------------------------------------------------------------------------
 int OptionsScreenVideo::getImageQuality()
 {
+    // applySettings assumes that only the first image quality preset has a different
+    // level of anisotropic filtering from others
     if (UserConfigParams::m_anisotropic == 4 &&
         (UserConfigParams::m_high_definition_textures & 0x01) == 0x00 &&
         UserConfigParams::m_hq_mipmap == false)
@@ -314,7 +316,7 @@ void OptionsScreenVideo::init()
     // the graphics engine, start the benchmark when the
     // video settings screen is loaded back afterwards.
     if (RaceManager::get()->isBenchmarkScheduled())
-        startBenchmark();
+        profiler.startBenchmark();
 }   // init
 
 // --------------------------------------------------------------------------------------------
@@ -662,80 +664,59 @@ void OptionsScreenVideo::eventCallback(Widget* widget, const std::string& name,
     else if (name == "benchmarkCurrent")
     {
 #ifndef SERVER_ONLY
-        // TODO - Add the possibility to benchmark more tracks and define replay benchmarks in
-        //        a config file
-        const std::string bf_bench("benchmark_black_forest.replay");
-        const bool result = ReplayPlay::get()->addReplayFile(file_manager
-            ->getAsset(FileManager::REPLAY, bf_bench), true/*custom_replay*/);
-
-        if (!result)
-            Log::fatal("OptionsScreenVideo", "Can't open replay for benchmark!");
-
-        // Avoid crashing, when switching between advanced lighting and the old renderer
-        // before starting a performance test, ensure the image quality setting is applied
-        if (m_prev_adv_pipline != UserConfigParams::m_dynamic_lights &&
-            CVS->isGLSL())
-        {
-            irr_driver->sameRestart();
-            // We cannot start the benchmark immediately, in case we just restarted the graphics engine
-            RaceManager::get()->scheduleBenchmark();
-        }
-        else if (m_prev_img_quality != getImageQuality())
-        {
-            // TODO - check if this is enough for the setting to be properly applied
-            irr_driver->setMaxTextureSize();
-            startBenchmark();
-        }
+        // To avoid crashes and ensure the proper settings are used during the benchmark,
+        // we apply the settings. If this doesn't require restarting the screen, we start
+        // the benchmark immediately, otherwise we schedule it to start after the restart.
+        if (applySettings() == 0)
+            profiler.startBenchmark();
         else
-        {
-            startBenchmark();
-        }
+            RaceManager::get()->scheduleBenchmark();
 #endif
     } // benchmarkCurrent
-    // TODO - Add a standard benchmark testing multiple presets
-    /*else if (name == "benchmarkStandard")
+    else if (name == "benchmarkRecommend")
     {
-        // DO NOTHING FOR NOW
-    }*/
+        new RecommendVideoSettingsDialog(0.8f, 0.9f);
+    } // benchmarkRecommend
 }   // eventCallback
-
-// --------------------------------------------------------------------------------------------
-
-void OptionsScreenVideo::startBenchmark()
-{
-    RaceManager::get()->setRaceGhostKarts(true);
-    RaceManager::get()->setMinorMode(RaceManager::MINOR_MODE_TIME_TRIAL);
-    ReplayPlay::ReplayData bench_rd = ReplayPlay::get()->getCurrentReplayData();
-    RaceManager::get()->setReverseTrack(bench_rd.m_reverse);
-    RaceManager::get()->setRecordRace(false);
-    RaceManager::get()->setWatchingReplay(true);
-    RaceManager::get()->setDifficulty((RaceManager::Difficulty)bench_rd.m_difficulty);
-
-    // The race manager automatically adds karts for the ghosts
-    RaceManager::get()->setNumKarts(0);
-    RaceManager::get()->setBenchmarking(true); // Also turns off the scheduled benchmark if needed
-    RaceManager::get()->startWatchingReplay(bench_rd.m_track_name, bench_rd.m_laps);
-} // startBenchmark
 
 // --------------------------------------------------------------------------------------------
 
 void OptionsScreenVideo::tearDown()
 {
 #ifndef SERVER_ONLY
-    if (m_prev_adv_pipline != UserConfigParams::m_dynamic_lights &&
-        CVS->isGLSL())
-    {
-        irr_driver->sameRestart();
-    }
-    else if (m_prev_img_quality != getImageQuality())
-    {
-        irr_driver->setMaxTextureSize();
-    }
+    applySettings();
     Screen::tearDown();
     // save changes when leaving screen
     user_config->saveConfig();
 #endif
 }   // tearDown
+
+// --------------------------------------------------------------------------------------------
+/* Returns 1 or 2 if a restart will be done, 0 otherwise */
+int OptionsScreenVideo::applySettings()
+{
+    int restart = 0;
+#ifndef SERVER_ONLY
+    if (m_prev_adv_pipline != UserConfigParams::m_dynamic_lights && CVS->isGLSL())
+        restart = 1;
+
+    if (m_prev_img_quality != getImageQuality())
+    {
+        irr_driver->setMaxTextureSize();
+        // A full restart is needed to properly apply anisotropic filtering if it was changed
+        // We assume that all ImageQuality settings >= 1 use the same x16 setting.
+        if ((m_prev_img_quality == 0 && getImageQuality() != 0) ||
+            (m_prev_img_quality != 0 && getImageQuality() == 0))
+            restart = 2;
+    }
+
+    if (restart == 1)
+        irr_driver->sameRestart();
+    else if (restart == 2)
+        irr_driver->fullRestart();
+#endif
+    return restart;
+}   // applySettings
 
 // --------------------------------------------------------------------------------------------
 

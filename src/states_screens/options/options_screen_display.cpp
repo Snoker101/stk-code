@@ -19,7 +19,7 @@
 // Manages includes common to all or most options screens
 #include "states_screens/options/options_common.hpp"
 
-#include "graphics/camera.hpp"
+#include "graphics/camera/camera.hpp"
 #include "graphics/irr_driver.hpp"
 #include "modes/world.hpp"
 
@@ -375,7 +375,6 @@ void OptionsScreenDisplay::eventCallback(Widget* widget, const std::string& name
 
         CheckBoxWidget* w2 = getWidget<CheckBoxWidget>("fullscreen");
         assert(w2 != NULL);
-
 
         irr_driver->changeResolution(w, h, w2->getState());
     }
