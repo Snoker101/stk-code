@@ -72,7 +72,6 @@
 #include <ctime>
 #include <cstdlib>
 #include <unordered_map>
-#include <random>
 
 std::vector<std::string> tips; // vector to store the tips
 std::string random_tip = "no tips for today, enjoy!";
@@ -178,8 +177,14 @@ void removeName(std::string playerName){
     return;
 }
 // Create arrays for team names
-  std::vector<std::string> redteam;
-  std::vector<std::string> blueteam;
+std::vector<std::string> redteam_starting;
+std::vector<std::string> blueteam_starting;
+
+std::vector<std::string> redteam_finishing;
+std::vector<std::string> blueteam_finishing;
+
+std::vector<std::string> loser_team_starting;
+std::vector<std::string> loser_team_finishing;
 
 struct Player {
     std::string name;
@@ -919,6 +924,17 @@ else
 
 random_tip = generateRandomMessage(tips);
 
+
+// Clear team vectors at the end
+redteam_starting.clear();
+blueteam_starting.clear();
+
+redteam_finishing.clear();
+blueteam_finishing.clear();
+
+loser_team_starting.clear();
+loser_team_finishing.clear();
+
 }   // updateTracksForMode
 
 //-----------------------------------------------------------------------------
@@ -1089,7 +1105,6 @@ void ServerLobby::handleChat(Event* event)
         delete chat;
     }
 }   // handleChat
-
 //-----------------------------------------------------------------------------
 void ServerLobby::changeTeam(Event* event)
 {
@@ -2952,21 +2967,6 @@ void ServerLobby::startSelection(const Event *event)
     // Will be changed after the first vote received
     m_timeout.store(std::numeric_limits<int64_t>::max());
 
-     // Loop through all peers and add to team arrays
-  for (auto& peer : STKHost::get()->getPeers()) {
-    if (!peer->isValidated())
-      continue;
-
-    for (auto& player : peer->getPlayerProfiles()) {
-      if(player->getTeam() == KART_TEAM_RED) {
-        redteam.push_back(StringUtils::wideToUtf8(player->getName()));
-      }
-      else if(player->getTeam() == KART_TEAM_BLUE) {
-        blueteam.push_back(StringUtils::wideToUtf8(player->getName()));
-      }
-    }
-  }
-
 }   // startSelection
 
 //-----------------------------------------------------------------------------
@@ -3216,24 +3216,42 @@ if (!playerScores.empty())  // check if the vector is not empty
 float a = (std::max(2.0f,rank1_score/50.0f) - 1) /(last_rank - 1);
 float b = 1 - a;
 
+float a2 = -2/(last_rank-1);
+float b2 = 2 - a2;
+
+bool red_winner = true;
+int score_diff = sw->getScore(KART_TEAM_BLUE)- sw->getScore(KART_TEAM_RED);
+
 // Update scores
 for (unsigned i = 0; i < sw->getNumKarts(); i++) {
     const RemoteKartInfo& rki = RaceManager::get()->getKartInfo(i);
     std::string name = StringUtils::wideToUtf8(rki.getPlayerName());
 
     KartTeam team = sw->getKartTeam(i);
+
+    if(team == KART_TEAM_RED)
+    {
+        redteam_finishing.push_back(name);
+        red_winner= sw->getKartSoccerResult(i);
+    }
+    else if(team == KART_TEAM_BLUE)
+        blueteam_finishing.push_back(name);
+
     int team_scored = sw->getScore(team);
     KartTeam opposing_team = (team == KART_TEAM_RED) ? KART_TEAM_BLUE : KART_TEAM_RED;
     int team_received = (sw->getScore(opposing_team));
-    int score = std::max(0, team_scored - team_received);
+    int goal_diff = team_scored - team_received;
 
     bool foundPlayer = false;
 
-    if ((team == KART_TEAM_RED && std::find(redteam.begin(), redteam.end(), name) != redteam.end()) ||
-    (team == KART_TEAM_BLUE && std::find(blueteam.begin(), blueteam.end(), name) != blueteam.end())) {
+    if ((team == KART_TEAM_RED && std::find(redteam_starting.begin(), redteam_starting.end(), name) != redteam_starting.end()) ||
+    (team == KART_TEAM_BLUE && std::find(blueteam_starting.begin(), blueteam_starting.end(), name) != blueteam_starting.end())) {
         for (auto& savedPlayer : playerScores) {
             if (savedPlayer.name == name) {
-                savedPlayer.score += score*(a*savedPlayer.rank+b); // Update player's score
+                if (goal_diff >= 0)
+                    savedPlayer.score += goal_diff*(a*savedPlayer.rank+b); // Update player's score
+                else
+                    savedPlayer.score += goal_diff*(a2*savedPlayer.rank+b2); // Update player's score
                 foundPlayer = true;
                 break;
             }
@@ -3241,11 +3259,34 @@ for (unsigned i = 0; i < sw->getNumKarts(); i++) {
 
         if (!foundPlayer) {
             // Add new player
-            playerScores.push_back(Player{name, 0, score});
+            if (goal_diff < 0) goal_diff = 0;
+            playerScores.push_back(Player{name, 0, goal_diff});
         }
     }
 }
 
+// Apply penalty to loser team quitters
+KartTeam loser_team = (red_winner) ? KART_TEAM_BLUE : KART_TEAM_RED;
+
+std::vector<std::string>& loser_team_starting = (loser_team == KART_TEAM_RED) ? redteam_starting : blueteam_starting;
+std::vector<std::string>& loser_team_finishing = (loser_team == KART_TEAM_RED) ? redteam_finishing : blueteam_finishing;
+
+for (const auto& name : loser_team_starting) {
+    // Check if the player is not in the finishing vector
+    if (std::find(loser_team_finishing.begin(), loser_team_finishing.end(), name) == loser_team_finishing.end()) {
+        // Find the player in playerScores
+        auto it = std::find_if(playerScores.begin(), playerScores.end(),
+                               [&name](const Player& p) { return p.name == name; });
+
+        if (it != playerScores.end()) {
+            // Calculate the score reduction
+            int score_reduction = std::abs(score_diff) * (a2 * it->rank + b2);
+
+            // Subtract from the player's score
+            it->score -= score_reduction;
+        }
+    }
+}
 
 // Sort players by score in descending order
 std::sort(playerScores.begin(), playerScores.end(), [](const Player& a, const Player& b) {
@@ -3256,14 +3297,14 @@ std::sort(playerScores.begin(), playerScores.end(), [](const Player& a, const Pl
 int total_players = STKHost::get()->getPlayersInGame(); // Get the total number of players
 std::ofstream outfile2("debug.txt");
 outfile2 << total_players ;
-if(total_players > 2 ){
+if(total_players > 2 ){ // Only consider games with more than 2 player and scores that are more than zero
 
 std::ofstream outfile("soccer_scores.txt");
 
 int rank = 0, lastScore = -1;
 
 for (auto& player : playerScores) {
-    if (player.score > 0) {  // Only consider games with more than 1 player and scores that are more than zero
+    if (player.score > 0) {
         if (player.score != lastScore) {
             rank++;
             lastScore = player.score;
@@ -3275,10 +3316,14 @@ outfile.close();
 }
 outfile2.close();
 // Clear team vectors at the end
-redteam.clear();
-blueteam.clear();
+redteam_starting.clear();
+blueteam_starting.clear();
 
+redteam_finishing.clear();
+blueteam_finishing.clear();
 
+loser_team_starting.clear();
+loser_team_finishing.clear();
 }   // checkRaceFinished
 
 //-----------------------------------------------------------------------------
@@ -4220,6 +4265,92 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
         country_code = ipv62Country(peer->getAddress());
 #endif
 
+  int prosLimit = ServerConfig::m_pros_limit;
+  if (prosLimit !=0)
+{
+    // Convert irr::core::stringw to std::wstring
+    std::wstring wideString(online_name.c_str());
+
+    // Convert std::wstring to std::string
+    std::string stdName(wideString.begin(), wideString.end());
+
+    // Now you can use stdName as a std::string
+    if (getPlayerInfo(stdName).first > prosLimit || getPlayerInfo(stdName).first == -1)
+    {
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "Sorry mate, but you are not a pro yet!";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        peer->sendPacket(chat, true/*reliable*/);
+        delete chat;
+
+        peer->reset();
+        return;
+
+    }
+
+}
+
+  std::vector<std::wstring> banned_players;
+        std::wifstream file("banned_players.txt");
+        if (file.is_open()) {
+            std::wstring word;
+            while (std::getline(file, word)) {
+                banned_players.push_back(word);
+            }
+            file.close();
+        }
+        else {
+            // create the file if it doesn't exist with some default values
+            std::wofstream new_file("banned_players.txt");
+            new_file << L"player$\nto$\nban$";
+            new_file.close();
+            // read from the newly created file
+            std::wifstream new_file_read("banned_players.txt");
+            std::wstring word;
+            while (std::getline(new_file_read, word)) {
+                banned_players.push_back(word);
+            }
+            new_file_read.close();
+        }
+       // Example of converting irr::core::stringw to std::wstring
+        std::wstring name_wstring(online_name.c_str());
+        bool is_banned_name = false;
+
+        // Remove symbols '-', '_', and '.'
+        name_wstring.erase(std::remove_if(name_wstring.begin(), name_wstring.end(),
+                                        [](wchar_t c) { return c == L'-' || c == L'_' || c == L'.'; }),
+                        name_wstring.end());
+
+        // Convert name to lowercase
+        std::transform(name_wstring.begin(), name_wstring.end(), name_wstring.begin(), [](wchar_t c) { return std::towlower(c); });
+
+        for (const auto& banned_name : banned_players) {
+            std::wstring lowercase_banned_name;
+            // Convert the banned name to lowercase
+            std::transform(banned_name.begin(), banned_name.end(), std::back_inserter(lowercase_banned_name), [](wchar_t c) { return std::towlower(c); });
+
+            // Check if the lowercase banned name is contained in the lowercase name_wstring
+            if (name_wstring.find(lowercase_banned_name) != std::wstring::npos) {
+                is_banned_name = true;
+                break; // Stop the loop if a banned name is found
+            }
+        }
+        if (is_banned_name) {
+            peer->reset();
+            Log::verbose("ServerLobby", "Player refused: banned player");
+
+            // Writing to a file named "join_attempts.txt"
+            std::wofstream file("join_attempts.txt", std::ios::app); // Open in append mode
+            if (file.is_open()) {
+                file << online_name.c_str() << L" attempted to join\n";
+                file.close();
+            }
+
+            return;
+        }
+
     auto red_blue = STKHost::get()->getAllPlayersTeamInfo();
     for (unsigned i = 0; i < player_count; i++)
     {
@@ -4228,8 +4359,8 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
         // 30 to make it consistent with stk-addons max user name length
         if (name.empty())
             name = L"unnamed";
-        else if (name.size() > 30)
-            name = name.subString(0, 30);
+        else if (name.size() > 19)
+            name = name.subString(0, 19);
         // Check if player's name is "Snoker" and set country code to "LB"
         if (online_name == L"Snoker")
             country_code = "LB";
@@ -4237,11 +4368,11 @@ void ServerLobby::handleUnencryptedConnection(std::shared_ptr<STKPeer> peer,
         HandicapLevel handicap = (HandicapLevel)data.getUInt8();
         auto player = std::make_shared<NetworkPlayerProfile>
             (peer, i == 0 && !online_name.empty() && !peer->isAIPeer() ?
-            online_name : name,
+            online_name.subString(0, 19) : name,
             peer->getHostId(), default_kart_color, i == 0 ? online_id : 0,
             handicap, (uint8_t)i, KART_TEAM_NONE,
             country_code);
-        if (ServerConfig::m_team_choosing)
+         if (ServerConfig::m_team_choosing)
             {
                 KartTeam cur_team = KART_TEAM_NONE;
 
@@ -4809,7 +4940,7 @@ bool ServerLobby::handleAllVotes(PeerVote* winner_vote,
     }
 
     std::string top_track = m_default_vote->m_track_name;
-    unsigned top_laps = m_default_vote->m_num_laps;
+    int top_laps = m_default_vote->m_num_laps;
     bool top_reverse = m_default_vote->m_reverse;
 
     std::map<std::string, unsigned> tracks;
@@ -4820,6 +4951,7 @@ bool ServerLobby::handleAllVotes(PeerVote* winner_vote,
     float tracks_rate = 0.0f;
     float laps_rate = 0.0f;
     float reverses_rate = 0.0f;
+    RandomGenerator rg;
 
     for (auto& p : m_peers_votes)
     {
@@ -4840,9 +4972,57 @@ bool ServerLobby::handleAllVotes(PeerVote* winner_vote,
             reverse_vote->second++;
     }
 
-    findMajorityValue<std::string>(tracks, cur_players, &top_track, &tracks_rate);
-    findMajorityValue<unsigned>(laps, cur_players, &top_laps, &laps_rate);
-    findMajorityValue<bool>(reverses, cur_players, &top_reverse, &reverses_rate);
+    unsigned vote = 0;
+    auto track_vote = tracks.begin();
+    // rg.get(2) == 0 will allow not always the "less" in map get picked
+    for (auto c_vote = tracks.begin(); c_vote != tracks.end(); c_vote++)
+    {
+        if (c_vote->second > vote ||
+            (c_vote->second >= vote && rg.get(2) == 0))
+        {
+            vote = c_vote->second;
+            track_vote = c_vote;
+        }
+    }
+    if (track_vote != tracks.end())
+    {
+        top_track = track_vote->first;
+        tracks_rate = float(track_vote->second) / cur_players;
+    }
+
+    vote = 0;
+    auto lap_vote = laps.begin();
+    for (auto c_vote = laps.begin(); c_vote != laps.end(); c_vote++)
+    {
+        if (c_vote->second > vote ||
+            (c_vote->second >= vote && rg.get(2) == 0))
+        {
+            vote = c_vote->second;
+            lap_vote = c_vote;
+        }
+    }
+    if (lap_vote != laps.end())
+    {
+        top_laps = lap_vote->first;
+        laps_rate = float(lap_vote->second) / cur_players;
+    }
+
+    vote = 0;
+    auto reverse_vote = reverses.begin();
+    for (auto c_vote = reverses.begin(); c_vote != reverses.end(); c_vote++)
+    {
+        if (c_vote->second > vote ||
+            (c_vote->second >= vote && rg.get(2) == 0))
+        {
+            vote = c_vote->second;
+            reverse_vote = c_vote;
+        }
+    }
+    if (reverse_vote != reverses.end())
+    {
+        top_reverse = reverse_vote->first;
+        reverses_rate = float(reverse_vote->second) / cur_players;
+    }
 
     // End early if there is majority agreement which is all entries rate > 0.5
     it = m_peers_votes.begin();
@@ -4859,18 +5039,15 @@ bool ServerLobby::handleAllVotes(PeerVote* winner_vote,
         }
         if (it == m_peers_votes.end())
         {
-            // Don't end if no vote matches all majority choices
             Log::warn("ServerLobby",
                 "Missing track %s from majority.", top_track.c_str());
             it = m_peers_votes.begin();
-            if (!isVotingOver())
-                return false;
         }
         *winner_peer_id = it->first;
         *winner_vote = it->second;
         return true;
     }
-    if (isVotingOver())
+    else if (isVotingOver())
     {
         // Pick the best lap (or soccer goal / time) from only the top track
         // if no majority agreement from all
@@ -4879,10 +5056,10 @@ bool ServerLobby::handleAllVotes(PeerVote* winner_vote,
         while (it != m_peers_votes.end())
         {
             if (it->second.m_track_name == top_track &&
-                std::abs((int)it->second.m_num_laps - (int)top_laps) < diff)
+                std::abs((int)it->second.m_num_laps - top_laps) < diff)
             {
                 closest_lap = it;
-                diff = std::abs((int)it->second.m_num_laps - (int)top_laps);
+                diff = std::abs((int)it->second.m_num_laps - top_laps);
             }
             else
                 it++;
@@ -4893,42 +5070,6 @@ bool ServerLobby::handleAllVotes(PeerVote* winner_vote,
     }
     return false;
 }   // handleAllVotes
-
-// ----------------------------------------------------------------------------
-template<typename T>
-void ServerLobby::findMajorityValue(const std::map<T, unsigned>& choices, unsigned cur_players,
-                       T* best_choice, float* rate)
-{
-    RandomGenerator rg;
-    unsigned max_votes = 0;
-    auto best_iter = choices.begin();
-    unsigned best_iters_count = 1;
-    // Among choices with max votes, we need to pick one uniformly,
-    // thus we have to keep track of their number
-    for (auto iter = choices.begin(); iter != choices.end(); iter++)
-    {
-        if (iter->second > max_votes)
-        {
-            max_votes = iter->second;
-            best_iter = iter;
-            best_iters_count = 1;
-        }
-        else if (iter->second == max_votes)
-        {
-            best_iters_count++;
-            if (rg.get(best_iters_count) == 0)
-            {
-                max_votes = iter->second;
-                best_iter = iter;
-            }
-        }
-    }
-    if (best_iter != choices.end())
-    {
-        *best_choice = best_iter->first;
-        *rate = float(best_iter->second) / cur_players;
-    }
-}   // findMajorityValue
 
 // ----------------------------------------------------------------------------
 void ServerLobby::getHitCaptureLimit()
@@ -4980,6 +5121,16 @@ void ServerLobby::finishedLoadingWorldClient(Event *event)
     Log::info("ServerLobby", "Peer %d has finished loading world at %lf",
         peer->getHostId(), StkTime::getRealTime());
 
+    if (!peer->isSpectator())
+    {
+
+        if(peer->getPlayerProfiles()[0]->getTeam() == KART_TEAM_RED) {
+            redteam_starting.push_back(StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName()));
+        }
+        else if(peer->getPlayerProfiles()[0]->getTeam() == KART_TEAM_BLUE) {
+            blueteam_starting.push_back(StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName()));
+        }
+    }
     // Send a random tip when the peer finishes loading
     NetworkString* chat = getNetworkString();
     chat->addUInt8(LE_CHAT);
@@ -6732,6 +6883,32 @@ else if (argv[0] == "score")
 
 }
 
+else if (argv[0] == "bye")
+{
+        if (m_state.load() == RACING || m_state.load() == SELECTING)
+        {
+            NetworkString* chat = getNetworkString();
+            chat->addUInt8(LE_CHAT);
+            chat->setSynchronous(true);
+            std::string msg = "use in lobby only when no on-going match!";
+            chat->encodeString16(StringUtils::utf8ToWide(msg));
+            peer->sendPacket(chat, true/*reliable*/);
+            delete chat;
+            return;
+        }
+        std::string name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = name +":\n╔═╗   ║   ║╔═ ║\n╠═╝╗╚═║╠═ ║\n╚══╝   ╚╝╚═ O";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        auto peers = STKHost::get()->getPeers();
+        for (auto& p : peers) {
+            p->sendPacket(chat, true /* reliable */);
+        }
+        delete chat;
+
+}
 else if ((argv[0] == "changeteam") || (argv[0] == "ct"))
 {
     if (argv.size() != 3)
@@ -7252,9 +7429,57 @@ unmute_error:
         peer->sendPacket(error, true/*reliable*/);
         delete error;
     }
-    else if (argv[0] == "hi")
+    else if (argv[0] == "hi" || argv[0] == "hello")
     {
-        send_message("Server:hello");
+         if (m_state.load() == RACING || m_state.load() == SELECTING)
+        {
+            NetworkString* chat = getNetworkString();
+            chat->addUInt8(LE_CHAT);
+            chat->setSynchronous(true);
+            std::string msg = "use in lobby only when no on-going match!";
+            chat->encodeString16(StringUtils::utf8ToWide(msg));
+            peer->sendPacket(chat, true/*reliable*/);
+            delete chat;
+            return;
+        }
+        std::string name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = name +":\n║║╔═║║╔╗ ║\n╠╣╠═║║║║ ║\n║║╚═╚╚╚╝ O";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        auto peers = STKHost::get()->getPeers();
+        for (auto& p : peers) {
+            p->sendPacket(chat, true /* reliable */);
+        }
+        delete chat;
+
+    }
+        else if (argv[0] == "gg")
+    {
+         if (m_state.load() == RACING || m_state.load() == SELECTING)
+        {
+            NetworkString* chat = getNetworkString();
+            chat->addUInt8(LE_CHAT);
+            chat->setSynchronous(true);
+            std::string msg = "use in lobby only when no on-going match!";
+            chat->encodeString16(StringUtils::utf8ToWide(msg));
+            peer->sendPacket(chat, true/*reliable*/);
+            delete chat;
+            return;
+        }
+        std::string name = StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName());
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = name +":\n╔═╗╔═╗\n║╬║║╬║\n╬╗║╬╗║\n╚═╝╚═╝";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        auto peers = STKHost::get()->getPeers();
+        for (auto& p : peers) {
+            p->sendPacket(chat, true /* reliable */);
+        }
+        delete chat;
+
     }
     else if (argv[0] == "listmute")
     {
