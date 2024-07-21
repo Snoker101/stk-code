@@ -316,7 +316,7 @@ private:
     double computeDataAccuracy(double player1_rd, double player2_rd,
                                double player1_scores, double player2_scores,
                                int player_count, bool handicap_used);
-    void checkRaceFinished();
+    void checkRaceFinished(bool endnow = false);
     void getHitCaptureLimit();
     void configPeersStartTime();
     void resetServer();
@@ -362,6 +362,7 @@ public:
     virtual void asynchronousUpdate() OVERRIDE;
 
     void startSelection(const Event *event=NULL);
+    void send_message(std::string msg);
     void checkIncomingConnectionRequests();
     void finishedLoadingWorld() OVERRIDE;
     ServerState getCurrentState() const { return m_state.load(); }
