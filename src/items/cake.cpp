@@ -73,7 +73,7 @@ bool Cake::hit(AbstractKart* kart, PhysicalObject* obj)
             }
             else
             {
-                if (kart->getEnergy() >= 8.0) kart->setEnergy(kart->getEnergy()-8.0f);
+                if (kart->getEnergy() >= 5.0f) kart->setEnergy(kart->getEnergy()-5.0f);
                 else kart->setEnergy(0.0f);
             }
         }
