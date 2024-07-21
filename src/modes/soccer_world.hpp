@@ -95,6 +95,8 @@ private:
      *  triggered if the ball is off for more than 2 seconds. */
     int m_ball_invalid_timer;
     int m_ball_hitter;
+    int m_ball_hitter_red;
+    int m_ball_hitter_blue;
 
     /** Goals data of each team scored */
     std::vector<ScorerData> m_red_scorers;
@@ -177,6 +179,9 @@ public:
     // ------------------------------------------------------------------------
     const Vec3& getBallPosition() const
         { return (Vec3&)m_ball_body->getCenterOfMassTransform().getOrigin(); }
+    // ------------------------------------------------------------------------
+    const Vec3& getBallVelocity() const
+        { return (Vec3&)m_ball_body->getLinearVelocity(); }
     // ------------------------------------------------------------------------
     bool ballNotMoving() const
     {

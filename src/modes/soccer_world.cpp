@@ -22,6 +22,7 @@
 #include "audio/sfx_base.hpp"
 #include "config/user_config.hpp"
 #include "io/file_manager.hpp"
+#include "items/powerup_manager.hpp"
 #include "graphics/irr_driver.hpp"
 #include "karts/abstract_kart_animation.hpp"
 #include "karts/kart_model.hpp"
@@ -31,6 +32,7 @@
 #include "network/network_config.hpp"
 #include "network/network_string.hpp"
 #include "network/protocols/game_events_protocol.hpp"
+#include "network/protocols/server_lobby.hpp"
 #include "network/stk_host.hpp"
 #include "network/stk_peer.hpp"
 #include "physics/physics.hpp"
@@ -270,13 +272,17 @@ SoccerWorld::~SoccerWorld()
 /** Initializes the soccer world. It sets up the data structure
  *  to keep track of points etc. for each kart.
  */
+int once = 1;
 void SoccerWorld::init()
 {
+    once = 1;
     m_kart_team_map.clear();
     m_kart_position_map.clear();
     WorldWithRank::init();
     m_display_rank = false;
     m_ball_hitter  = -1;
+    m_ball_hitter_red = -1;
+    m_ball_hitter_blue = -1;
     m_ball         = NULL;
     m_ball_body    = NULL;
     m_goal_target  = RaceManager::get()->getMaxGoal();
@@ -503,6 +509,13 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
             m_goal_frame.push_back(m_frame_count - elapsed_frame);
         }
 
+        if (!isCorrectGoal(m_ball_hitter, first_goal))
+        {
+          KartTeam team = getKartTeam(m_ball_hitter);
+          if (team == KART_TEAM_RED && m_ball_hitter_blue != -1) m_ball_hitter = m_ball_hitter_blue;
+          else if (team == KART_TEAM_BLUE && m_ball_hitter_red != -1) m_ball_hitter = m_ball_hitter_red;
+        }
+
         ScorerData sd = {};
         sd.m_id = m_ball_hitter;
         sd.m_correct_goal = isCorrectGoal(m_ball_hitter, first_goal);
@@ -602,6 +615,16 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         kart->getBody()->setAngularVelocity(Vec3(0.0f));
         m_goal_transforms[i] = kart->getBody()->getWorldTransform();
     }
+
+    if((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 4) && (once == 1) && (!isRaceOver()))
+    {
+        set_powerup_multiplier(3);
+        auto sl = LobbyProtocol::get<ServerLobby>();
+        sl->send_message("Powerupper on (automatically)");
+        once = 2;
+    }
+    m_ball_hitter_red = -1;
+    m_ball_hitter_blue = -1;
 }   // onCheckGoalTriggered
 
 //-----------------------------------------------------------------------------
@@ -736,6 +759,9 @@ void SoccerWorld::resetKartsToSelfGoals()
 void SoccerWorld::setBallHitter(unsigned int kart_id)
 {
     m_ball_hitter = kart_id;
+    KartTeam team = getKartTeam(kart_id);
+    if (team == KART_TEAM_RED) m_ball_hitter_red = kart_id;
+    else m_ball_hitter_blue = kart_id;
 }   // setBallHitter
 
 //-----------------------------------------------------------------------------
