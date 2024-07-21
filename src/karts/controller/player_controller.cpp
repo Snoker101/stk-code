@@ -48,13 +48,7 @@
 #include <cmath>
 #include <fstream>
 using namespace std;
-float   jump_limit = 70,
-        jump_value1 = 8.0,
-        jump_value2 = 8.0,
-        jump_value3_sta = 3.5,
-        jump_value3_mov = 18.0,
-        jump_value4_sta = 0.5,
-        jump_value4_mov = 1.0,
+float   jump_limit = 10,
         jump_distance_threshold_static = 25.0,
         jump_distance_threshold_moving = 18.0,
         jump_distance_max_fastjumping = 11.0,
@@ -70,6 +64,7 @@ Vec3 kartPos,ballPos,ballradius;
 PlayerController::PlayerController(AbstractKart *kart)
                 : Controller(kart)
 {
+    jump_limit = kart->getXYZ().getY() + 10;
     m_penalty_ticks = 0;
 }   // PlayerController
 
@@ -261,7 +256,7 @@ bool PlayerController::action(PlayerAction action, int value, bool dry_run)
         ball_x = ballPos.getX();
         ball_z = ballPos.getZ();
 
-        if (((kart_vy >= 0) || (kart_vy < 0 && kart_y <= 0)) && ((ball_y - kart_y) < jump_ball_height_max)   && ((ball_y - kart_y) > jump_ball_height_min) &&  (sqrt(pow(kart_x - ball_x, 2) + pow(kart_z - ball_z, 2)) < jump_distance_threshold_moving))
+        if (((kart_vy >= 0) || (kart_vy < 0 && kart_y <= 0)) && ((ball_y - kart_y) < jump_ball_height_max)   && ((ball_y - kart_y) > jump_ball_height_min) &&  (sqrt(pow(kart_x - ball_x, 2) + pow(kart_z - ball_z, 2)) < jump_distance_threshold_moving) && (kart_y <= jump_limit))
         {
 
         //get ball velocity
