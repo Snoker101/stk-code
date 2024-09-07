@@ -48,7 +48,7 @@
 #include <cmath>
 #include <fstream>
 using namespace std;
-float   jump_limit = 10,
+float   jump_limit = 3,
         jump_distance_threshold_static = 25.0,
         jump_distance_threshold_moving = 18.0,
         jump_distance_max_fastjumping = 11.0,
@@ -64,7 +64,7 @@ Vec3 kartPos,ballPos,ballradius;
 PlayerController::PlayerController(AbstractKart *kart)
                 : Controller(kart)
 {
-    jump_limit = kart->getXYZ().getY() + 10;
+    jump_limit = kart->getXYZ().getY() + 3;
     m_penalty_ticks = 0;
 }   // PlayerController
 
