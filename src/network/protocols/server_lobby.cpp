@@ -5294,7 +5294,7 @@ void ServerLobby::handleServerCommand(Event* event,
     auto argv = StringUtils::split(cmd, ' ');
     if (argv.size() == 0)
         return;
-    if (argv[0] == "spectate")
+    if (argv[0] == "spectate" || argv[0] == "s")
     {
         if (m_game_setup->isGrandPrix() || !ServerConfig::m_live_players)
         {
@@ -5568,6 +5568,90 @@ else if (argv[0] == "tip")
     chat->encodeString16(StringUtils::utf8ToWide(msg));
     peer->sendPacket(chat, true /* reliable */);
     delete chat;
+}
+else if (argv[0] == "teams")
+{
+    int red_team_score = 0;
+    int blue_team_score = 0;
+
+    // Loop through all the peers (players)
+    auto peers = STKHost::get()->getPeers();
+    for (auto& player_peer : peers)
+    {
+        // Access the first player profile and get the player's name and team
+        auto profiles = player_peer->getPlayerProfiles();
+        if (!profiles.empty())
+        {
+            if (!player_peer->alwaysSpectate())
+            {
+                std::string player_name = StringUtils::wideToUtf8(profiles[0]->getName());  // Get the player's name
+                KartTeam current_team = profiles[0]->getTeam();  // Get the player's team
+
+                // Get the player's score
+                std::pair<int, int> player_info = getPlayerInfo(player_name);
+                int player_score = 0;
+                if (player_info.second > 0)
+                    player_score = player_info.second;
+
+                // Add the player's score to the appropriate team
+                if (current_team == KartTeam::KART_TEAM_RED)
+                {
+                    red_team_score += player_score;
+                }
+                else if (current_team == KartTeam::KART_TEAM_BLUE)
+                {
+                    blue_team_score += player_score;
+                }
+            }
+        }
+    }
+
+    // Calculate the total score
+    int total_score = red_team_score + blue_team_score;
+
+    if (total_score > 0) // Avoid division by zero
+    {
+        // Calculate the percentage of each team
+        int red_percentage = (red_team_score * 100) / total_score;
+        int blue_percentage = 100 - red_percentage;  // The rest goes to the blue team
+
+        // Calculate the number of squares for each team (round to the nearest whole number)
+        int red_squares = (red_percentage + 5) / 10;  // Round to nearest integer
+        int blue_squares = 10 - red_squares;          // Remaining squares go to the blue team
+
+        // Create the visualization using square emojis
+        std::wstring visualization;
+        visualization.append(red_squares, L'\U0001F7E5');  // Red squares 🟥
+        visualization.append(blue_squares, L'\U0001F7E6'); // Blue squares 🟦
+
+        // Create the result message
+        std::wstring result_msg = L"   Red " + std::to_wstring(red_percentage) + L"% - " +
+                                  std::to_wstring(blue_percentage) + L"% Blue\n" + visualization;
+
+        // Convert std::wstring to irr::core::stringw
+        irr::core::stringw irr_result_msg = result_msg.c_str();
+
+        // Send the message to the peer
+        NetworkString* result = getNetworkString();
+        result->addUInt8(LE_CHAT);
+        result->setSynchronous(true);
+        result->encodeString16(irr_result_msg);
+        peer->sendPacket(result, true /* reliable */);
+        delete result;
+    }
+    else
+    {
+        // Handle case where both teams have 0 score
+        std::wstring result_msg = L"No scores available for either team.";
+        irr::core::stringw irr_result_msg = result_msg.c_str();
+
+        NetworkString* result = getNetworkString();
+        result->addUInt8(LE_CHAT);
+        result->setSynchronous(true);
+        result->encodeString16(irr_result_msg);
+        peer->sendPacket(result, true /* reliable */);
+        delete result;
+    }
 }
 
 else if (argv[0] == "rank")
