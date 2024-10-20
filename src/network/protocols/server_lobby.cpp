@@ -5582,8 +5582,8 @@ else if (argv[0] == "teams")
         auto profiles = player_peer->getPlayerProfiles();
         if (!profiles.empty())
         {
-            if (!player_peer->alwaysSpectate())
-            {
+            if (player_peer->alwaysSpectate() || player_peer->isSpectator()) continue;
+
                 std::string player_name = StringUtils::wideToUtf8(profiles[0]->getName());  // Get the player's name
                 KartTeam current_team = profiles[0]->getTeam();  // Get the player's team
 
@@ -5602,7 +5602,7 @@ else if (argv[0] == "teams")
                 {
                     blue_team_score += player_score;
                 }
-            }
+
         }
     }
 
@@ -5653,7 +5653,6 @@ else if (argv[0] == "teams")
         delete result;
     }
 }
-
 else if (argv[0] == "rank")
 {
     if (argv.size() < 2) {
