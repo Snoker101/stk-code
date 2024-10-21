@@ -17,7 +17,7 @@
 //  Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "items/bowling.hpp"
-
+#include "items/powerup.hpp"
 #include "audio/sfx_base.hpp"
 #include "audio/sfx_manager.hpp"
 #include "graphics/hit_sfx.hpp"
@@ -156,7 +156,20 @@ bool Bowling::hit(AbstractKart* kart, PhysicalObject* obj)
 {
     bool was_real_hit = Flyable::hit(kart, obj);
     if(was_real_hit)
-    {
+    { if(kart)
+        {
+        World *world = World::getWorld();
+        if (world->hasTeam() &&
+            world->getKartTeam(kart->getWorldKartId()) ==
+            world->getKartTeam(m_owner->getWorldKartId()))
+        {
+            int powerups_num = kart->getNumPowerup();
+
+            if (powerups_num == 0 || kart->getPowerup()->getType() == PowerupManager::POWERUP_BOWLING)
+                kart->setPowerup(PowerupManager::POWERUP_BOWLING, 1);
+        }
+        }
+
         if(kart && kart->isShielded())
         {
             kart->decreaseShieldTime();
