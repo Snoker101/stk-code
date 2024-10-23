@@ -163,9 +163,9 @@ bool Bowling::hit(AbstractKart* kart, PhysicalObject* obj)
             world->getKartTeam(kart->getWorldKartId()) ==
             world->getKartTeam(m_owner->getWorldKartId()))
         {
-            int powerups_num = kart->getNumPowerup();
+           // int powerups_num = kart->getNumPowerup();
 
-            if (powerups_num == 0 || kart->getPowerup()->getType() == PowerupManager::POWERUP_BOWLING)
+           // if (powerups_num == 0 || kart->getPowerup()->getType() == PowerupManager::POWERUP_BOWLING)
                 kart->setPowerup(PowerupManager::POWERUP_BOWLING, 1);
         }
         }
