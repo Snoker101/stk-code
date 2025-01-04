@@ -632,7 +632,7 @@ PowerupManager::PowerupType PowerupManager::getRandomPowerup(unsigned int pos,
                 int red_score = sw->getScore(KART_TEAM_RED);
                 int blue_score = sw->getScore(KART_TEAM_BLUE);
                 int diff = abs(red_score-blue_score);
-                if (diff > 4) diff =4;
+                if (diff > 2) diff =2;
                 powerup_multiplier_value = diff+1;
                 *n=powerup_multiplier_value;
             }
