@@ -99,6 +99,10 @@
 #include <limits>
 #include <cmath>
 
+#include <fstream>
+using namespace std;
+
+unsigned int nitro_multiplier = 0;
 
 #if defined(WIN32) && !defined(__CYGWIN__)  && !defined(__MINGW32__)
    // Disable warning for using 'this' in base member initializer list
@@ -189,6 +193,10 @@ Kart::Kart (const std::string& ident, unsigned int world_kart_id,
     m_previous_terrain_sound = NULL;
 }   // Kart
 
+void set_nitro_multiplier(unsigned int value)
+{
+    nitro_multiplier = value;
+}
 // -----------------------------------------------------------------------------
 /** This is a second initialisation phase, necessary since in the constructor
  *  virtual functions are not called for any superclasses.
@@ -1138,16 +1146,29 @@ void Kart::collectedItem(ItemState *item_state)
     float old_energy          = m_collected_energy;
     const Item::ItemType type = item_state->getType();
 
+    float ibost = 0;
+
+    if (nitro_multiplier == 20)
+    {
+    SoccerWorld* sw = dynamic_cast<SoccerWorld*>(World::getWorld());
+    bool winy = sw->getKartSoccerResult(this->getWorldKartId());
+
+    const int red_score = sw->getScore(KART_TEAM_RED);
+    const int blue_score = sw->getScore(KART_TEAM_BLUE);
+    int diff = abs(red_score-blue_score);
+    if (!winy) ibost = (diff+1)*round(nitro_multiplier/7);
+    }
+
     switch (type)
     {
     case Item::ITEM_BANANA:
         m_attachment->hitBanana(item_state);
         break;
     case Item::ITEM_NITRO_SMALL:
-        m_collected_energy += m_kart_properties->getNitroSmallContainer();
+        m_collected_energy += m_kart_properties->getNitroSmallContainer() + ibost/2;
         break;
     case Item::ITEM_NITRO_BIG:
-        m_collected_energy += m_kart_properties->getNitroBigContainer();
+        m_collected_energy += m_kart_properties->getNitroBigContainer() + ibost;
         break;
     case Item::ITEM_BONUS_BOX  :
         {
@@ -2825,9 +2846,11 @@ void Kart::updateEnginePowerAndBrakes(int ticks)
         if(m_controls.getBrake())
         {   // check if the player is currently only slowing down
             // or moving backwards
+            int m = 3;
             if(m_speed > 0.0f)
             {   // Still going forward while braking
-                applyEngineForce(engine_power-braking_power*3);
+                if (m_controls.getNitro()) m = 5;
+                applyEngineForce(engine_power-braking_power*m);
                 m_brake_ticks += ticks;
                 // Apply the brakes - include the time dependent brake increase
                 float f = 1.0f + stk_config->ticks2Time(m_brake_ticks)
@@ -2845,7 +2868,8 @@ void Kart::updateEnginePowerAndBrakes(int ticks)
                     // The backwards acceleration is artificially increased to
                     // allow players to get "unstuck" quicker if they hit e.g.
                     // a wall.
-                    applyEngineForce(engine_power-braking_power*3);
+                    if (m_controls.getNitro()) m = 5;
+                    applyEngineForce(engine_power-braking_power*m-m*3+3*3);
                 }
                 else  // -m_speed >= max speed on this terrain
                 {

@@ -526,6 +526,9 @@ void Skidding::update(int ticks, bool is_on_ground,
             float bonus_time, bonus_speed, bonus_force;
             unsigned int level = getSkidBonus(&bonus_time, &bonus_speed,
                                               &bonus_force);
+            float kart_energy = m_kart->getEnergy();
+            if ( kart_energy <= 10.0f)
+                m_kart->setEnergy(kart_energy + 0.01f);
 
             if (level >= 1 && !(level == 0 && m_remaining_jump_time <= 0.0f))
             {
