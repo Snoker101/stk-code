@@ -72,6 +72,8 @@
 #include <vector>
 #include <cstdlib>
 #include <unordered_map>
+#include "sqlite3.h" //  You will have to install the package libsqlite3-dev. For ubuntu: "sudo apt install libsqlite3-dev"
+                    // and build game with sqlite3 on: "cmake .. -DNO_SHADERC=on ENABLE_SQLITE3"
 
 struct PlayerStats
 {
