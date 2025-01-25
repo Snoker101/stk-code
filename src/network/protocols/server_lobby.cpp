@@ -73,6 +73,74 @@
 #include <cstdlib>
 #include <unordered_map>
 
+struct PlayerStats
+{
+    int rank;
+    std::string name;
+    float scoringPoints;
+    float attackingPoints;
+    float defendingPoints;
+    float badPlayPoints;
+    float total;
+    float matchesPlayed;
+    int matches_participated;
+    int matchesWon;
+    float teamMembersCount;
+    float minutes_played_count;
+};
+
+// Helper function to retrieve a player by partial name from file
+bool getPlayerFromFile(const std::string& fileName, const std::string& partialName, PlayerStats& outStats)
+{
+    std::ifstream file(fileName);
+    if (!file.is_open())
+    {
+        std::cerr << "Could not open file: " << fileName << std::endl;
+        return false;
+    }
+
+    // Skip header line
+    std::string headerLine;
+    if (!std::getline(file, headerLine))
+    {
+        file.close();
+        return false;
+    }
+
+    std::string line;
+    while (std::getline(file, line))
+    {
+        if (line.empty()) continue; // Skip empty lines
+
+        std::stringstream ss(line);
+        PlayerStats temp;
+        ss >> temp.rank     // Rank
+           >> temp.name     // Player
+           >> temp.scoringPoints
+           >> temp.attackingPoints
+           >> temp.defendingPoints
+           >> temp.badPlayPoints
+           >> temp.total
+           >> temp.matchesPlayed
+           >> temp.matches_participated
+           >> temp.matchesWon
+           >> temp.teamMembersCount
+           >> temp.minutes_played_count;
+
+        // Check if the player's name contains the "partialName" substring
+        // Example: "snoker" matches "sno", "gavr" matches "gav", etc.
+        if (temp.name.find(partialName) != std::string::npos)
+        {
+            outStats = temp;
+            file.close();
+            return true; // Return the first match found
+        }
+    }
+    file.close();
+    return false;
+}
+
+
 std::vector<std::string> tips; // vector to store the tips
 std::string random_tip = "no tips for today, enjoy!";
   // List of joining messages
@@ -99,15 +167,7 @@ std::string generateRandomMessage(const std::vector<std::string> Messages) {
 std::string lastJoinedName;
 std::string lastLeftName;
 
-// Create arrays for team names
-std::vector<std::string> redteam_starting;
-std::vector<std::string> blueteam_starting;
-
-std::vector<std::string> redteam_finishing;
-std::vector<std::string> blueteam_finishing;
-
-std::vector<std::string> loser_team_starting;
-std::vector<std::string> loser_team_finishing;
+float minutes_dur = 10.0f;
 
 struct Player {
     std::string name;
@@ -117,7 +177,7 @@ struct Player {
 
 std::pair<int, int> getPlayerInfo(std::string playerName) {
     std::vector<Player> players;
-    std::ifstream file("soccer_scores.txt");
+    std::ifstream file("soccer_ranking.txt");
     std::string line;
     while(std::getline(file, line)){
         std::istringstream iss(line);
@@ -176,12 +236,12 @@ public:
 
 /** This is the central game setup protocol running in the server. It is
  *  mostly a finite state machine. Note that all nodes in ellipses and light
- *  grey background are actual states; nodes in boxes and white background 
+ *  grey background are actual states; nodes in boxes and white background
  *  are functions triggered from a state or triggering potentially a state
  *  change.
  \dot
  digraph interaction {
- node [shape=box]; "Server Constructor"; "playerTrackVote"; "connectionRequested"; 
+ node [shape=box]; "Server Constructor"; "playerTrackVote"; "connectionRequested";
                    "signalRaceStartToClients"; "startedRaceOnClient"; "loadWorld";
  node [shape=ellipse,style=filled,color=lightgrey];
 
@@ -197,7 +257,7 @@ public:
  "playerTrackVote" -> "SELECTING" [label="Not all clients have selected"]
  "playerTrackVote" -> "LOAD_WORLD" [label="All clients have selected; signal load_world to clients"]
  "LOAD_WORLD" -> "loadWorld"
- "loadWorld" -> "WAIT_FOR_WORLD_LOADED" 
+ "loadWorld" -> "WAIT_FOR_WORLD_LOADED"
  "WAIT_FOR_WORLD_LOADED" -> "WAIT_FOR_WORLD_LOADED" [label="Client or server loaded world"]
  "WAIT_FOR_WORLD_LOADED" -> "signalRaceStartToClients" [label="All clients and server ready"]
  "signalRaceStartToClients" -> "WAIT_FOR_RACE_STARTED"
@@ -369,6 +429,7 @@ void ServerLobby::updateTracksForMode()
     m_available_kts.second = { all_t.begin(), all_t.end() };
     RaceManager::MinorRaceModeType m =
         ServerConfig::getLocalGameMode(m_game_mode.load()).first;
+
     switch (m)
     {
         case RaceManager::MINOR_MODE_NORMAL_RACE:
@@ -475,18 +536,291 @@ void ServerLobby::updateTracksForMode()
 
     random_tip = generateRandomMessage(tips);
 
+ // --------------------------------------------------------------------------
+// Fetch all rows from the “players” table, compute, and write them to text files
+// 1) detailed file: soccer_ranking_detailed.txt
+// 2) summary file:  soccer_ranking.txt
+// 3) full dump:     db_table_copy.txt  (no min. minutes filter)
+// --------------------------------------------------------------------------
+{
+    sqlite3* db2 = nullptr;
+    int rc2 = sqlite3_open("soccer_ranking_detailed.db", &db2);
+    if (rc2 != SQLITE_OK)
+    {
+        Log::warn("SoccerWorld",
+                  (std::string("Cannot open SQLite DB for fetch: ") +
+                   sqlite3_errmsg(db2)).c_str());
+        if (db2) sqlite3_close(db2);
+    }
+    else
+    {
+        // Open the detailed output file
+        std::ofstream out_file_detailed("soccer_ranking_detailed.txt");
+        if (!out_file_detailed.is_open())
+        {
+            Log::warn("SoccerWorld",
+                      "Cannot open soccer_ranking_detailed.txt for writing.");
+            sqlite3_close(db2);
+            return;
+        }
 
-    // Clear team vectors at the end
-    redteam_starting.clear();
-    blueteam_starting.clear();
+        // Open the summary output file
+        std::ofstream out_file_short("soccer_ranking.txt");
+        if (!out_file_short.is_open())
+        {
+            Log::warn("SoccerWorld",
+                      "Cannot open soccer_ranking.txt for writing.");
+            sqlite3_close(db2);
+            out_file_detailed.close();
+            return;
+        }
 
-    redteam_finishing.clear();
-    blueteam_finishing.clear();
+        //
+        // NEW SECTION: Open the "db_table_copy.txt" file
+        //
+        std::ofstream out_file_copy("db_table_copy.txt");
+        if (!out_file_copy.is_open())
+        {
+            Log::warn("SoccerWorld",
+                      "Cannot open db_table_copy.txt for writing.");
+            sqlite3_close(db2);
+            out_file_detailed.close();
+            out_file_short.close();
+            return;
+        }
 
-    loser_team_starting.clear();
-    loser_team_finishing.clear();
+        // Prepare the select statement
+        const char* select_sql =
+            "SELECT "
+            "  PlayerName, "
+            "  ScoringPts, "
+            "  AttackingPts, "
+            "  DefendingPts, "
+            "  BadPlayPts, "
+            "  Total, "
+            "  Rank, "
+            "  matches_played, "
+            "  matches_participated, "
+            "  matches_won, "
+            "  team_members_count, "
+            "  minutes_played_count "
+            "FROM players "
+            "ORDER BY Total DESC;";
 
-}   // updateTracksForMode
+        sqlite3_stmt* stmt_fetch = nullptr;
+        rc2 = sqlite3_prepare_v2(db2, select_sql, -1, &stmt_fetch, nullptr);
+        if (rc2 != SQLITE_OK)
+        {
+            Log::warn("SoccerWorld",
+                      (std::string("Failed to prepare SELECT statement: ") +
+                       sqlite3_errmsg(db2)).c_str());
+            sqlite3_close(db2);
+            return;
+        }
+
+        // We'll store data in a custom struct for sorting and ranking
+        struct PlayerRow
+        {
+            std::string playerName;
+            float scoringPtsPerMinutes;
+            float attackingPtsPerMinutes;
+            float defendingPtsPerMinutes;
+            float badPlayPtsPerMinutes;
+            float totalPerMinutes;
+            float matchesPlayed;
+            int   matchesParticipated;
+            int   matchesWon;
+            float teamMembersCountPerMinutes;
+            float minutesPlayedCount;
+            int   rank; // We'll assign rank after sorting
+        };
+
+        std::vector<PlayerRow> allPlayers;
+
+        //
+        // Write a header line into db_table_copy.txt
+        //
+        out_file_copy
+            << "PlayerName,ScoringPts,AttackingPts,DefendingPts,"
+            << "BadPlayPts,Total,Rank,matches_played,matches_participated,"
+            << "matches_won,team_members_count,minutes_played_count\n";
+
+        // Fetch rows and compute per-minute metrics
+        while ((rc2 = sqlite3_step(stmt_fetch)) == SQLITE_ROW)
+        {
+            const unsigned char* playerName = sqlite3_column_text(stmt_fetch, 0);
+            float scoringPts         = (float)sqlite3_column_int(stmt_fetch, 1);
+            float attackingPts       = (float)sqlite3_column_int(stmt_fetch, 2);
+            float defendingPts       = (float)sqlite3_column_int(stmt_fetch, 3);
+            float badPlayPts         = (float)sqlite3_column_int(stmt_fetch, 4);
+            float matchesPlayed      = (float)sqlite3_column_double(stmt_fetch, 7);
+            int   matchesParticipated= sqlite3_column_int(stmt_fetch, 8);
+            int   matchesWon         = sqlite3_column_int(stmt_fetch, 9);
+            float teamMembersCount   = (float)sqlite3_column_int(stmt_fetch, 10);
+            float minutesPlayedCount = (float)sqlite3_column_double(stmt_fetch, 11);
+
+            // -------------------------------------------------
+            // Write the unfiltered row directly to db_table_copy.txt
+            // (no minutesPlayedCount >= 30 condition)
+            // -------------------------------------------------
+            {
+                // If you simply want to copy the columns as they are:
+                // (No per-minute calculations for db_table_copy.txt)
+                out_file_copy
+                    << (playerName ? reinterpret_cast<const char*>(playerName) : "(null)") << ","
+                    << scoringPts       << ","
+                    << attackingPts     << ","
+                    << defendingPts     << ","
+                    << badPlayPts       << ","
+                    << /* 6 = total */     /* Whether or not you want to output it by reading? */
+                    sqlite3_column_int(stmt_fetch, 5) << ","
+                    << /* 7 = rank  */       sqlite3_column_int(stmt_fetch, 6) << ","
+                    << matchesPlayed    << ","
+                    << matchesParticipated << ","
+                    << matchesWon       << ","
+                    << teamMembersCount << ","
+                    << minutesPlayedCount << "\n";
+            }
+
+            //
+            // Keep the old (minutesPlayedCount >= 30.0f) logic for ranking:
+            //
+            if (minutesPlayedCount >= 30.0f)
+            {
+                // Make sure minutes_dur is defined somewhere, e.g. float minutes_dur = 1.0f;
+                float scoringPtsPerMinutes     =
+                    (minutesPlayedCount == 0.0f) ? 0.0f :
+                    std::round(minutes_dur * scoringPts / minutesPlayedCount * 100.0f) / 100.0f;
+                float attackingPtsPerMinutes   =
+                    (minutesPlayedCount == 0.0f) ? 0.0f :
+                    std::round(minutes_dur * attackingPts / minutesPlayedCount * 100.0f) / 100.0f;
+                float defendingPtsPerMinutes   =
+                    (minutesPlayedCount == 0.0f) ? 0.0f :
+                    std::round(minutes_dur * defendingPts / minutesPlayedCount * 100.0f) / 100.0f;
+                float badPlayPtsPerMinutes     =
+                    (minutesPlayedCount == 0.0f) ? 0.0f :
+                    std::round(minutes_dur * badPlayPts / minutesPlayedCount * 100.0f) / 100.0f;
+                float teamMembersCountPerMinutes =
+                    (minutesPlayedCount == 0.0f) ? 0.0f :
+                    std::round(minutes_dur * teamMembersCount / minutesPlayedCount * 100.0f) / 100.0f;
+
+                float totalPerMinutes =
+                    std::round(
+                        (scoringPtsPerMinutes
+                        + attackingPtsPerMinutes
+                        + defendingPtsPerMinutes
+                        + badPlayPtsPerMinutes)
+                        * teamMembersCountPerMinutes
+                        * 100.0f
+                    ) / 100.0f;
+
+                PlayerRow row;
+                row.playerName                = (playerName
+                                                 ? reinterpret_cast<const char*>(playerName)
+                                                 : "(null)");
+                row.scoringPtsPerMinutes      = scoringPtsPerMinutes;
+                row.attackingPtsPerMinutes    = attackingPtsPerMinutes;
+                row.defendingPtsPerMinutes    = defendingPtsPerMinutes;
+                row.badPlayPtsPerMinutes      = badPlayPtsPerMinutes;
+                row.totalPerMinutes           = totalPerMinutes;
+                row.matchesPlayed             = matchesPlayed;
+                row.matchesParticipated       = matchesParticipated;
+                row.matchesWon                = matchesWon;
+                row.teamMembersCountPerMinutes= teamMembersCountPerMinutes;
+                row.minutesPlayedCount        = minutesPlayedCount;
+                row.rank = 0; // placeholder (will assign after sorting)
+                allPlayers.push_back(row);
+            }
+        }
+
+        if (rc2 != SQLITE_DONE)
+        {
+            Log::warn("SoccerWorld",
+                      (std::string("Select statement did not finish successfully: ") +
+                       sqlite3_errmsg(db2)).c_str());
+        }
+
+        sqlite3_finalize(stmt_fetch);
+        sqlite3_close(db2);
+
+        // Sort the collected players by totalPerMinutes (descending)
+        std::sort(allPlayers.begin(), allPlayers.end(),
+                  [](const PlayerRow& a, const PlayerRow& b)
+                  {
+                      return a.totalPerMinutes > b.totalPerMinutes;
+                  });
+
+        // Assign ranks (players with the same totalPerMinutes get the same rank)
+        if (!allPlayers.empty())
+        {
+            int currentRank = 1;
+            allPlayers[0].rank = currentRank;
+
+            for (size_t i = 1; i < allPlayers.size(); ++i)
+            {
+                if (std::fabs(allPlayers[i].totalPerMinutes
+                              - allPlayers[i - 1].totalPerMinutes) < 1e-6f)
+                {
+                    // Same totalPerMinutes => same rank
+                    allPlayers[i].rank = allPlayers[i - 1].rank;
+                }
+                else
+                {
+                    // Different totalPerMinutes => new rank is i+1 (1-based)
+                    allPlayers[i].rank = static_cast<int>(i + 1);
+                }
+            }
+        }
+
+        // 1) Write the detailed header row
+        out_file_detailed
+            << "Rank PlayerName ScoringPts/min AttackingPts/min DefendingPts/min "
+            << "BadPlayPts/min TotalPerMinutes matches_played matches_participated "
+            << "matches_won teamMembersCount/min minutes_played_count\n";
+
+        // 2) Write the summary header row
+        out_file_short << "Rank PlayerName TotalPerMinutes\n";
+
+        // Write the data with rank (detailed and summary)
+        for (const auto& row : allPlayers)
+        {
+            // soccer_ranking_detailed.txt
+            out_file_detailed
+                << row.rank << " "
+                << row.playerName << " "
+                << row.scoringPtsPerMinutes << " "
+                << row.attackingPtsPerMinutes << " "
+                << row.defendingPtsPerMinutes << " "
+                << row.badPlayPtsPerMinutes << " "
+                << row.totalPerMinutes << " "
+                << row.matchesPlayed << " "
+                << row.matchesParticipated << " "
+                << row.matchesWon << " "
+                << row.teamMembersCountPerMinutes << " "
+                << row.minutesPlayedCount << "\n";
+
+            // soccer_ranking.txt (just rank, name, totalPerMinutes)
+            out_file_short
+                << row.rank << " "
+                << row.playerName << " "
+                << row.totalPerMinutes << "\n";
+        }
+
+        // Close all files
+        out_file_detailed.close();
+        out_file_short.close();
+        out_file_copy.close();
+
+        Log::info("SoccerWorld",
+                  "Data written to soccer_ranking_detailed.txt, soccer_ranking.txt, "
+                  "and db_table_copy.txt successfully.");
+    }
+}
+
+
+
+} // updateTracksForMode
+
 
 //-----------------------------------------------------------------------------
 void ServerLobby::setup()
@@ -531,7 +865,7 @@ void ServerLobby::setup()
 
     m_server_has_loaded_world.store(false);
 
-    // Initialise the data structures to detect if all clients and 
+    // Initialise the data structures to detect if all clients and
     // the server are ready:
     resetPeersReady();
     m_timeout.store(std::numeric_limits<int64_t>::max());
@@ -1801,7 +2135,7 @@ void ServerLobby::update(int ticks)
 //-----------------------------------------------------------------------------
 /** Register this server (i.e. its public address) with the STK server
  *  so that clients can find it. It blocks till a response from the
- *  stk server is received (this function is executed from the 
+ *  stk server is received (this function is executed from the
  *  ProtocolManager thread). The information about this client is added
  *  to the table 'server'.
  */
@@ -2443,7 +2777,7 @@ void ServerLobby::checkRaceFinished(bool endnow)
                 player->setOverallTime(overall_time);
             }
             m_result_ns->addUInt32(last_score).addUInt32(cur_score)
-                .addFloat(overall_time);            
+                .addFloat(overall_time);
         }
     }
     else if (RaceManager::get()->modeHasLaps())
@@ -2467,151 +2801,6 @@ void ServerLobby::checkRaceFinished(bool endnow)
     }
     m_state.store(WAIT_FOR_RACE_STOPPED);
 
-    // After the match ends: Manage the ranking:
-SoccerWorld* sw = dynamic_cast<SoccerWorld*>(World::getWorld());
-
-struct Player {
-    std::string name;
-    int rank;
-    int score;
-};
-
-std::vector<Player> playerScores;  // Vector to hold playerName, rank, and score
-
-// Read existing scores from the file
-std::ifstream scores_file("soccer_scores.txt");
-std::string line;
-while (std::getline(scores_file, line)) {
-    std::istringstream iss(line);
-    std::string existing_name;
-    int existing_rank, existing_score;
-    if (!(iss >> existing_rank >> existing_name >> existing_score)) { continue; } // Enhanced error checking
-    playerScores.push_back(Player{existing_name, existing_rank, existing_score});
-}
-scores_file.close();
-
-int last_rank = 2;
-int rank1_score = 1;
-if (!playerScores.empty())  // check if the vector is not empty
-{
-    rank1_score = playerScores.front().score;  // score of the first player
-    last_rank = playerScores.back().rank;  // rank of the last player
-    if (last_rank == 1) last_rank =2;
-}
-
-// calculate a & b
-float a = (std::max(2.0f,rank1_score/50.0f) - 1) /(last_rank - 1);
-float b = 1 - a;
-
-float a2 = -2/(last_rank-1);
-float b2 = 2 - a2;
-
-bool red_winner = true;
-int score_diff = sw->getScore(KART_TEAM_BLUE)- sw->getScore(KART_TEAM_RED);
-
-// Update scores
-for (unsigned i = 0; i < sw->getNumKarts(); i++) {
-    const RemoteKartInfo& rki = RaceManager::get()->getKartInfo(i);
-    std::string name = StringUtils::wideToUtf8(rki.getPlayerName());
-
-    KartTeam team = sw->getKartTeam(i);
-
-    if(team == KART_TEAM_RED)
-    {
-        redteam_finishing.push_back(name);
-        red_winner= sw->getKartSoccerResult(i);
-    }
-    else if(team == KART_TEAM_BLUE)
-        blueteam_finishing.push_back(name);
-
-    int team_scored = sw->getScore(team);
-    KartTeam opposing_team = (team == KART_TEAM_RED) ? KART_TEAM_BLUE : KART_TEAM_RED;
-    int team_received = (sw->getScore(opposing_team));
-    int goal_diff = team_scored - team_received;
-
-    bool foundPlayer = false;
-
-    if ((team == KART_TEAM_RED && std::find(redteam_starting.begin(), redteam_starting.end(), name) != redteam_starting.end()) ||
-    (team == KART_TEAM_BLUE && std::find(blueteam_starting.begin(), blueteam_starting.end(), name) != blueteam_starting.end())) {
-        for (auto& savedPlayer : playerScores) {
-            if (savedPlayer.name == name) {
-                if (goal_diff >= 0)
-                    savedPlayer.score += goal_diff*(a*savedPlayer.rank+b); // Update player's score
-                else
-                    savedPlayer.score += goal_diff*(a2*savedPlayer.rank+b2); // Update player's score
-                foundPlayer = true;
-                break;
-            }
-        }
-
-        if (!foundPlayer) {
-            // Add new player
-            if (goal_diff < 0) goal_diff = 0;
-            playerScores.push_back(Player{name, 0, goal_diff});
-        }
-    }
-}
-
-// Apply penalty to loser team quitters
-KartTeam loser_team = (red_winner) ? KART_TEAM_BLUE : KART_TEAM_RED;
-
-std::vector<std::string>& loser_team_starting = (loser_team == KART_TEAM_RED) ? redteam_starting : blueteam_starting;
-std::vector<std::string>& loser_team_finishing = (loser_team == KART_TEAM_RED) ? redteam_finishing : blueteam_finishing;
-
-for (const auto& name : loser_team_starting) {
-    // Check if the player is not in the finishing vector
-    if (std::find(loser_team_finishing.begin(), loser_team_finishing.end(), name) == loser_team_finishing.end()) {
-        // Find the player in playerScores
-        auto it = std::find_if(playerScores.begin(), playerScores.end(),
-                               [&name](const Player& p) { return p.name == name; });
-
-        if (it != playerScores.end()) {
-            // Calculate the score reduction
-            int score_reduction = std::abs(score_diff) * (a2 * it->rank + b2);
-
-            // Subtract from the player's score
-            it->score -= score_reduction;
-        }
-    }
-}
-
-// Sort players by score in descending order
-std::sort(playerScores.begin(), playerScores.end(), [](const Player& a, const Player& b) {
-  return a.score > b.score;
-});
-
-// Write updated scores and ranks back to the file
-int total_players = STKHost::get()->getPlayersInGame(); // Get the total number of players
-std::ofstream outfile2("debug.txt");
-outfile2 << total_players ;
-if(total_players > 2 ){ // Only consider games with more than 2 player and scores that are more than zero
-
-std::ofstream outfile("soccer_scores.txt");
-
-int rank = 0, lastScore = -1;
-
-for (auto& player : playerScores) {
-    if (player.score > 0) {
-        if (player.score != lastScore) {
-            rank++;
-            lastScore = player.score;
-        }
-        outfile << rank << " " << player.name << " " << player.score << "\n"; // Write rank, player name, and score
-    }
-}
-outfile.close();
-}
-outfile2.close();
-// Clear team vectors at the end
-redteam_starting.clear();
-blueteam_starting.clear();
-
-redteam_finishing.clear();
-blueteam_finishing.clear();
-
-loser_team_starting.clear();
-loser_team_finishing.clear();
-
 }   // checkRaceFinished
 
 //-----------------------------------------------------------------------------
@@ -2619,17 +2808,17 @@ loser_team_finishing.clear();
  */
 void ServerLobby::computeNewRankings()
 {
-    
+
     // No ranking for battle mode
     if (!RaceManager::get()->modeHasLaps())
         return;
 
-    
+
     World* w = World::getWorld();
     assert(w);
 
     unsigned player_count = RaceManager::get()->getNumPlayers();
-    
+
 
     // If all players quitted the race, we assume something went wrong
     // and skip entirely rating and statistics updates.
@@ -3271,7 +3460,7 @@ int prosLimit = ServerConfig::m_pros_limit;
             core::stringw name = _("Bot");
 #endif
             name += core::stringw(" ") + StringUtils::toWString(i + 1);
-            
+
             m_ai_profiles.push_back(std::make_shared<NetworkPlayerProfile>
                 (peer, name, peer->getHostId(), 0.0f, 0, HANDICAP_NONE,
                 player_count + i, KART_TEAM_NONE, ""));
@@ -3425,7 +3614,7 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
             profile_name = StringUtils::utf32ToWide({ 0x1F4F1 }) + profile_name;
 
         // Add an hourglass emoji for players waiting because of the player limit
-        if (spectators_by_limit.find(profile->getPeer()) != spectators_by_limit.end()) 
+        if (spectators_by_limit.find(profile->getPeer()) != spectators_by_limit.end())
             profile_name = StringUtils::utf32ToWide({ 0x231B }) + profile_name;
 
         pl->addUInt32(profile->getHostId()).addUInt32(profile->getOnlineId())
@@ -3677,7 +3866,7 @@ bool ServerLobby::handleAllVotes(PeerVote* winner_vote,
         return false;
     }
 
-    // Count number of players 
+    // Count number of players
     float cur_players = 0.0f;
     auto peers = STKHost::get()->getPeers();
     for (auto peer : peers)
@@ -3860,16 +4049,6 @@ void ServerLobby::finishedLoadingWorldClient(Event *event)
     Log::info("ServerLobby", "Peer %d has finished loading world at %lf",
         peer->getHostId(), StkTime::getRealTime());
 
-    if (!peer->isSpectator())
-    {
-
-        if(peer->getPlayerProfiles()[0]->getTeam() == KART_TEAM_RED) {
-            redteam_starting.push_back(StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName()));
-        }
-        else if(peer->getPlayerProfiles()[0]->getTeam() == KART_TEAM_BLUE) {
-            blueteam_starting.push_back(StringUtils::wideToUtf8(peer->getPlayerProfiles()[0]->getName()));
-        }
-    }
     // Send a random tip when the peer finishes loading
     NetworkString* chat = getNetworkString();
     chat->addUInt8(LE_CHAT);
@@ -5277,33 +5456,78 @@ else if (argv[0] == "teams")
     }
 }
 else if (argv[0] == "rank")
-{
-    if (argv.size() < 2) {
-
-        NetworkString* chat = getNetworkString();
-        chat->addUInt8(LE_CHAT);
-        chat->setSynchronous(true);
-        std::string msg = "Usage: /rank [Player name]";
-        chat->encodeString16(StringUtils::utf8ToWide(msg));
-        peer->sendPacket(chat, true/*reliable*/);
-        delete chat;
-        return;
-
+    {
+        if (argv.size() < 2)
+        {
+            NetworkString* chat = getNetworkString();
+            chat->addUInt8(LE_CHAT);
+            chat->setSynchronous(true);
+            std::string msg = "Usage: /rank [Partial or full player name]";
+            chat->encodeString16(StringUtils::utf8ToWide(msg));
+            peer->sendPacket(chat, true /* reliable */);
+            delete chat;
+            return;
         }
-    else {
-        auto rank = getPlayerInfo(argv[1]);
-        NetworkString* chat = getNetworkString();
-        chat->addUInt8(LE_CHAT);
-        chat->setSynchronous(true);
-        std::string msg = "No ranking found for this Player!";
-        if (rank.first != -1)
-        msg = argv[1]+" is ranked "+std::to_string(rank.first)+" with score "+std::to_string(rank.second) ;
-        chat->encodeString16(StringUtils::utf8ToWide(msg));
-        peer->sendPacket(chat, true /* reliable */);
-        delete chat;
+        else
+        {
+            // Attempt to retrieve player info (with partial name matching)
+            PlayerStats stats;
+            bool found = getPlayerFromFile("soccer_ranking_detailed.txt", argv[1], stats);
+
+            NetworkString* chat = getNetworkString();
+            chat->addUInt8(LE_CHAT);
+            chat->setSynchronous(true);
+
+            if (!found)
+            {
+                // No ranking found
+                std::string msg = "No ranking found for this Player!\nPlayer needs to play at least 30 minutes to get a rank";
+                chat->encodeString16(StringUtils::utf8ToWide(msg));
+            }
+            else
+            {
+                // Calculate the desired stats
+                double goalsPerMatch = 0.0;
+                double savesPerMatch = 0.0;
+                double winPercentage = 0.0;
+                int attackPct = 0;
+                int defensePct = 0;
+
+                if (stats.minutes_played_count > 0)
+                {
+                    goalsPerMatch = static_cast<double>(stats.scoringPoints*stats.minutes_played_count/minutes_dur) / stats.matchesPlayed;
+                    savesPerMatch = static_cast<double>(stats.defendingPoints*stats.minutes_played_count/minutes_dur) / stats.matchesPlayed;
+                    winPercentage = (static_cast<double>(stats.matchesWon) / stats.matches_participated) * 100.0;
+                }
+
+                // Compute integer attack / defense percentages
+                float totalAttackDefense = stats.attackingPoints + stats.defendingPoints;
+                if (totalAttackDefense > 0.0f)
+                {
+                    attackPct = (stats.attackingPoints * 100) / totalAttackDefense;
+                    defensePct = 100 - attackPct;
+                }
+
+                // Build the message
+                std::ostringstream msgStream;
+                msgStream << "-------------------------------------- " << "\n";
+                msgStream << "Player: " << stats.name << "\n";
+                msgStream << "Rank: " << stats.rank << "\n";
+                msgStream << "Points: " << stats.total << "\n";
+                msgStream << "goals/match: " << std::round(goalsPerMatch* 100.0f) / 100.0f << "\n";
+                msgStream << "saves/match: " << std::round(savesPerMatch* 100.0f) / 100.0f << "\n";
+                msgStream << "win percentage: " << winPercentage << "%\n";
+                msgStream << "Attack " << attackPct << "% : " << defensePct << "% Defense \n";
+                msgStream << "-------------------------------------- ";
+
+                chat->encodeString16(StringUtils::utf8ToWide(msgStream.str()));
+            }
+
+            peer->sendPacket(chat, true /* reliable */);
+            delete chat;
+        }
     }
 
-}
 
 
 else if (argv[0] == "top")
@@ -5314,8 +5538,8 @@ else if (argv[0] == "top")
     // Create a vector of tuples
     std::vector<std::tuple<int, std::string, int>> players;
 
-    // Read from the soccer_scores.txt file
-    std::ifstream file("soccer_scores.txt");
+    // Read from the soccer_ranking.txt file
+    std::ifstream file("soccer_ranking.txt");
     std::string line;
     int i =0;
     while(std::getline(file, line) && i<count){
@@ -5332,7 +5556,7 @@ else if (argv[0] == "top")
     NetworkString* chat = getNetworkString();
     chat->addUInt8(LE_CHAT);
     chat->setSynchronous(true);
-    std::string msg = "Rank        Player        Score\n";
+    std::string msg = "Rank        Player        Points\n";
 
     // Loop through the top 'n' scores
     for (const auto& player : players) {
@@ -5368,6 +5592,33 @@ else if (argv[0] == "score")
         chat->addUInt8(LE_CHAT);
         chat->setSynchronous(true);
         std::string msg = "\U0001f7e5 Red " + std::to_string(red_score)+ " : " + std::to_string(blue_score) + " Blue \U0001f7e6";
+        chat->encodeString16(StringUtils::utf8ToWide(msg));
+        peer->sendPacket(chat, true/*reliable*/);
+        delete chat;
+
+}
+else if (argv[0] == "poss")
+{
+        if (m_state.load() != RACING)
+        {
+            NetworkString* chat = getNetworkString();
+            chat->addUInt8(LE_CHAT);
+            chat->setSynchronous(true);
+            std::string msg = "No on-going game!";
+            chat->encodeString16(StringUtils::utf8ToWide(msg));
+            peer->sendPacket(chat, true/*reliable*/);
+            delete chat;
+            return;
+        }
+
+        auto poss = sw->getBallPossession();
+        int red_possession  = poss.first;
+        int blue_possession = poss.second;
+
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+        std::string msg = "\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6";
         chat->encodeString16(StringUtils::utf8ToWide(msg));
         peer->sendPacket(chat, true/*reliable*/);
         delete chat;
@@ -5494,6 +5745,62 @@ else if ((argv[0] == "changeteam") || (argv[0] == "ct"))
         new_file << "Help content is currently unavialable. Ask the owner to add it."; // write content to file
         new_file.close(); // close file
         file.open("help.txt"); // reopen file to read content
+    }
+
+    buffer << file.rdbuf();
+    std::string msg = buffer.str();
+
+    chat->encodeString16(StringUtils::utf8ToWide(msg));
+    peer->sendPacket(chat, true/*reliable*/);
+
+    file.close(); // close the file
+    delete chat;
+    return;
+    }
+
+else if (argv[0] == "alldata")
+    {
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+
+    std::ifstream file("db_table_copy.txt");
+    std::stringstream buffer;
+
+    if (!file.is_open()) // check if file is not found
+    {
+        std::ofstream new_file("db_table_copy.txt"); // create new file
+        new_file << "No data avialable"; // write content to file
+        new_file.close(); // close file
+        file.open("db_table_copy.txt"); // reopen file to read content
+    }
+
+    buffer << file.rdbuf();
+    std::string msg = buffer.str();
+
+    chat->encodeString16(StringUtils::utf8ToWide(msg));
+    peer->sendPacket(chat, true/*reliable*/);
+
+    file.close(); // close the file
+    delete chat;
+    return;
+    }
+
+else if (argv[0] == "stats")
+    {
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+
+    std::ifstream file("last_match_stats.txt");
+    std::stringstream buffer;
+
+    if (!file.is_open()) // check if file is not found
+    {
+        std::ofstream new_file("last_match_stats.txt"); // create new file
+        new_file << "No stats avialable"; // write content to file
+        new_file.close(); // close file
+        file.open("last_match_stats.txt"); // reopen file to read content
     }
 
     buffer << file.rdbuf();
