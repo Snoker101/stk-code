@@ -1370,7 +1370,7 @@ void SoccerWorld::enterRaceOverState()
         if (getKartTeam(i) == KART_TEAM_BLUE) blue_count += 1;
         }
 
-        if (red_count == 0 || blue_count == 0)
+        if ((red_count == 0) || (blue_count == 0) || ((red_count+blue_count) <= 2))
         {
             // If either team is missing, skip the ranking logic or just warn:
             Log::warn("SoccerWorld",
