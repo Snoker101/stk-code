@@ -12,7 +12,7 @@ The SuperTuxKart homepage can be found at <https://supertuxkart.net/>. There is 
 Latest release binaries can be found [here](https://github.com/supertuxkart/stk-code/releases/latest), and preview release [here](https://github.com/supertuxkart/stk-code/releases/preview).
 
 # This branch called "new" is the latest version of Snoccer server
-## It includes an advanced ranking system for soccer (to the best of our knowledge it marks the most advanced publicly available ranking system) for STK soccer.
+## It includes an advanced ranking system for soccer (to the best of our knowledge it marks the most advanced publicly available ranking system for STK soccer).
 # Important
 This version uses SQLite3 DB to save ranking data, on your system you have to install the package libsqlite3-dev. For debian: "sudo apt install libsqlite3-dev"
 and you must build the game with sqlite3 on: "cmake .. ENABLE_SQLITE3"
