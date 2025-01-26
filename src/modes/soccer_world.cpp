@@ -2046,7 +2046,6 @@ void SoccerWorld::getKartsDisplayInfo(
         }
     }
 }   // getKartsDisplayInfo
-
 std::pair<int, int> SoccerWorld::getBallPossession() const
 {
     int total = m_ball_possession_red + m_ball_possession_blue;
@@ -2057,7 +2056,7 @@ std::pair<int, int> SoccerWorld::getBallPossession() const
     }
 
     int red_percent  = 100 * m_ball_possession_red  / total;
-    int blue_percent = 100 * m_ball_possession_blue / total;
+    int blue_percent = 100 - red_percent;
 
     return std::make_pair(red_percent, blue_percent);
-}
+} // getBallPossession
