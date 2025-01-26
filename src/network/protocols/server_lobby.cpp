@@ -5483,7 +5483,7 @@ else if (argv[0] == "rank")
             if (!found)
             {
                 // No ranking found
-                std::string msg = "No ranking found for this Player!\nPlayer needs to play at least 30 minutes to get a rank";
+                std::string msg = "No ranking found for this Player!\nPlayer needs to play at least 30 minutes with others to get a rank";
                 chat->encodeString16(StringUtils::utf8ToWide(msg));
             }
             else
