@@ -70,6 +70,7 @@
 #include <sstream>      // for std::stringstream
 #include <string>       // for std::string
 #include <vector>
+#include <iomanip>
 #include <cstdlib>
 #include <unordered_map>
 #include "sqlite3.h" //  You will have to install the package libsqlite3-dev. For ubuntu: "sudo apt install libsqlite3-dev"
@@ -5538,7 +5539,7 @@ else if (argv[0] == "top")
     int count = (argv.size() > 1) ? std::stoi(argv[1]) : 8;
 
     // Create a vector of tuples
-    std::vector<std::tuple<int, std::string, int>> players;
+    std::vector<std::tuple<int, std::string, float>> players;
 
     // Read from the soccer_ranking.txt file
     std::ifstream file("soccer_ranking.txt");
@@ -5548,7 +5549,7 @@ else if (argv[0] == "top")
         std::istringstream iss(line);
         int rank;
         std::string name;
-        int score;
+        float score;
         if(!(iss >> rank >> name >> score)) { continue; }
         players.push_back(std::make_tuple(rank, name, score));
         i++;
@@ -5564,8 +5565,13 @@ else if (argv[0] == "top")
     for (const auto& player : players) {
         msg += "  #" + std::to_string(std::get<0>(player)) + "             ";
         msg += std::get<1>(player) + "            ";
-        msg += std::to_string(std::get<2>(player)) + "\n";
+
+        // Format score to 2 decimal places
+        std::ostringstream score_stream;
+        score_stream << std::fixed << std::setprecision(2) << std::get<2>(player);
+        msg += score_stream.str() + "\n";
     }
+
 
     chat->encodeString16(StringUtils::utf8ToWide(msg));
     peer->sendPacket(chat, true /* reliable */);
