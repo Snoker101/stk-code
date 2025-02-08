@@ -1492,7 +1492,7 @@ void SoccerWorld::enterRaceOverState()
 
                     // Everyone increments matches_played by +1
                     int matches_participated_increment = 1;
-                    float match_played_increment = std::round(fraction * 100.0f) / 100.0f;
+                    float match_played_increment = std::round(fraction * (static_cast<float>(m_goal_target) / 10.0f) * 100.0f) / 100.0f;
 
                     // If that player’s team was the match winner => matches_won +1
                     int match_won_increment = getKartSoccerResult(i) ? 1 : 0;
