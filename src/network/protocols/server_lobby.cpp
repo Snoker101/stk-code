@@ -625,15 +625,15 @@ void ServerLobby::updateTracksForMode()
         struct PlayerRow
         {
             std::string playerName;
-            float scoringPtsPerMinutes;
-            float attackingPtsPerMinutes;
-            float defendingPtsPerMinutes;
-            float badPlayPtsPerMinutes;
-            float totalPerMinutes;
+            float scoringPtsPerMatch;
+            float attackingPtsPerMatch;
+            float defendingPtsPerMatch;
+            float badPlayPtsPerMatch;
+            float totalPerMatch;
             float matchesPlayed;
             int   matchesParticipated;
             int   matchesWon;
-            float teamMembersCountPerMinutes;
+            float teamMembersCountPerMatch;
             float minutesPlayedCount;
             int   rank; // We'll assign rank after sorting
         };
@@ -688,32 +688,31 @@ void ServerLobby::updateTracksForMode()
             //
             // Keep the old (minutesPlayedCount >= 30.0f) logic for ranking:
             //
-            if (minutesPlayedCount >= 30.0f)
+            if ((minutesPlayedCount >= 30.0f) && (matchesPlayed >= 8))
             {
-                // Make sure minutes_dur is defined somewhere, e.g. float minutes_dur = 1.0f;
-                float scoringPtsPerMinutes     =
-                    (minutesPlayedCount == 0.0f) ? 0.0f :
-                    std::round(minutes_dur * scoringPts / minutesPlayedCount * 100.0f) / 100.0f;
-                float attackingPtsPerMinutes   =
-                    (minutesPlayedCount == 0.0f) ? 0.0f :
-                    std::round(minutes_dur * attackingPts / minutesPlayedCount * 100.0f) / 100.0f;
-                float defendingPtsPerMinutes   =
-                    (minutesPlayedCount == 0.0f) ? 0.0f :
-                    std::round(minutes_dur * defendingPts / minutesPlayedCount * 100.0f) / 100.0f;
-                float badPlayPtsPerMinutes     =
-                    (minutesPlayedCount == 0.0f) ? 0.0f :
-                    std::round(minutes_dur * badPlayPts / minutesPlayedCount * 100.0f) / 100.0f;
-                float teamMembersCountPerMinutes =
-                    (minutesPlayedCount == 0.0f) ? 0.0f :
-                    std::round(minutes_dur * teamMembersCount / minutesPlayedCount * 100.0f) / 100.0f;
+                float scoringPtsPerMatch     =
+                    (matchesPlayed == 0.0f) ? 0.0f :
+                    std::round(scoringPts / matchesPlayed * 100.0f) / 100.0f;
+                float attackingPtsPerMatch   =
+                    (matchesPlayed == 0.0f) ? 0.0f :
+                    std::round(attackingPts / matchesPlayed * 100.0f) / 100.0f;
+                float defendingPtsPerMatch   =
+                    (matchesPlayed == 0.0f) ? 0.0f :
+                    std::round(defendingPts / matchesPlayed * 100.0f) / 100.0f;
+                float badPlayPtsPerMatch     =
+                    (matchesPlayed == 0.0f) ? 0.0f :
+                    std::round(badPlayPts / matchesPlayed * 100.0f) / 100.0f;
+                float teamMembersCountPerMatch =
+                    (static_cast<float>(matchesParticipated) == 0.0f) ? 0.0f :
+                    std::round(teamMembersCount / static_cast<float>(matchesParticipated) * 100.0f) / 100.0f;
 
-                float totalPerMinutes =
+                float totalPerMatch =
                     std::round(
-                        (scoringPtsPerMinutes
-                        + attackingPtsPerMinutes
-                        + defendingPtsPerMinutes
-                        + badPlayPtsPerMinutes)
-                        * teamMembersCountPerMinutes
+                        (scoringPtsPerMatch
+                        + attackingPtsPerMatch
+                        + defendingPtsPerMatch
+                        + badPlayPtsPerMatch)
+                        * teamMembersCountPerMatch
                         * 100.0f
                     ) / 100.0f;
 
@@ -721,15 +720,15 @@ void ServerLobby::updateTracksForMode()
                 row.playerName                = (playerName
                                                  ? reinterpret_cast<const char*>(playerName)
                                                  : "(null)");
-                row.scoringPtsPerMinutes      = scoringPtsPerMinutes;
-                row.attackingPtsPerMinutes    = attackingPtsPerMinutes;
-                row.defendingPtsPerMinutes    = defendingPtsPerMinutes;
-                row.badPlayPtsPerMinutes      = badPlayPtsPerMinutes;
-                row.totalPerMinutes           = totalPerMinutes;
+                row.scoringPtsPerMatch      = scoringPtsPerMatch;
+                row.attackingPtsPerMatch    = attackingPtsPerMatch;
+                row.defendingPtsPerMatch    = defendingPtsPerMatch;
+                row.badPlayPtsPerMatch      = badPlayPtsPerMatch;
+                row.totalPerMatch           = totalPerMatch;
                 row.matchesPlayed             = matchesPlayed;
                 row.matchesParticipated       = matchesParticipated;
                 row.matchesWon                = matchesWon;
-                row.teamMembersCountPerMinutes= teamMembersCountPerMinutes;
+                row.teamMembersCountPerMatch= teamMembersCountPerMatch;
                 row.minutesPlayedCount        = minutesPlayedCount;
                 row.rank = 0; // placeholder (will assign after sorting)
                 allPlayers.push_back(row);
@@ -746,14 +745,14 @@ void ServerLobby::updateTracksForMode()
         sqlite3_finalize(stmt_fetch);
         sqlite3_close(db2);
 
-        // Sort the collected players by totalPerMinutes (descending)
+        // Sort the collected players by totalPerMatch (descending)
         std::sort(allPlayers.begin(), allPlayers.end(),
                   [](const PlayerRow& a, const PlayerRow& b)
                   {
-                      return a.totalPerMinutes > b.totalPerMinutes;
+                      return a.totalPerMatch > b.totalPerMatch;
                   });
 
-        // Assign ranks (players with the same totalPerMinutes get the same rank)
+        // Assign ranks (players with the same totalPerMatch get the same rank)
         if (!allPlayers.empty())
         {
             int currentRank = 1;
@@ -761,15 +760,15 @@ void ServerLobby::updateTracksForMode()
 
             for (size_t i = 1; i < allPlayers.size(); ++i)
             {
-                if (std::fabs(allPlayers[i].totalPerMinutes
-                              - allPlayers[i - 1].totalPerMinutes) < 1e-6f)
+                if (std::fabs(allPlayers[i].totalPerMatch
+                              - allPlayers[i - 1].totalPerMatch) < 1e-6f)
                 {
-                    // Same totalPerMinutes => same rank
+                    // Same totalPerMatch => same rank
                     allPlayers[i].rank = allPlayers[i - 1].rank;
                 }
                 else
                 {
-                    // Different totalPerMinutes => new rank is i+1 (1-based)
+                    // Different totalPerMatch => new rank is i+1 (1-based)
                     allPlayers[i].rank = static_cast<int>(i + 1);
                 }
             }
@@ -777,12 +776,12 @@ void ServerLobby::updateTracksForMode()
 
         // 1) Write the detailed header row
         out_file_detailed
-            << "Rank PlayerName ScoringPts/min AttackingPts/min DefendingPts/min "
-            << "BadPlayPts/min TotalPerMinutes matches_played matches_participated "
-            << "matches_won teamMembersCount/min minutes_played_count\n";
+            << "Rank PlayerName ScoringPts/match AttackingPts/match DefendingPts/match "
+            << "BadPlayPts/match totalPerMatch matches_played matches_participated "
+            << "matches_won teamMembersCount/match minutes_played_count\n";
 
         // 2) Write the summary header row
-        out_file_short << "Rank PlayerName TotalPerMinutes\n";
+        out_file_short << "Rank PlayerName Points\n";
 
         // Write the data with rank (detailed and summary)
         for (const auto& row : allPlayers)
@@ -791,22 +790,22 @@ void ServerLobby::updateTracksForMode()
             out_file_detailed
                 << row.rank << " "
                 << row.playerName << " "
-                << row.scoringPtsPerMinutes << " "
-                << row.attackingPtsPerMinutes << " "
-                << row.defendingPtsPerMinutes << " "
-                << row.badPlayPtsPerMinutes << " "
-                << row.totalPerMinutes << " "
+                << row.scoringPtsPerMatch << " "
+                << row.attackingPtsPerMatch << " "
+                << row.defendingPtsPerMatch << " "
+                << row.badPlayPtsPerMatch << " "
+                << row.totalPerMatch << " "
                 << row.matchesPlayed << " "
                 << row.matchesParticipated << " "
                 << row.matchesWon << " "
-                << row.teamMembersCountPerMinutes << " "
+                << row.teamMembersCountPerMatch << " "
                 << row.minutesPlayedCount << "\n";
 
-            // soccer_ranking.txt (just rank, name, totalPerMinutes)
+            // soccer_ranking.txt (just rank, name, totalPerMatch)
             out_file_short
                 << row.rank << " "
                 << row.playerName << " "
-                << row.totalPerMinutes << "\n";
+                << row.totalPerMatch << "\n";
         }
 
         // Close all files
@@ -5484,7 +5483,7 @@ else if (argv[0] == "rank")
             if (!found)
             {
                 // No ranking found
-                std::string msg = "No ranking found for this Player!\nPlayer needs to play at least 30 minutes with others to get a rank";
+                std::string msg = "No ranking found for this Player!\nPlayer needs to play at least 30 minutes and 8 matches with others to get a rank";
                 chat->encodeString16(StringUtils::utf8ToWide(msg));
             }
             else
@@ -5498,8 +5497,8 @@ else if (argv[0] == "rank")
 
                 if (stats.minutes_played_count > 0)
                 {
-                    goalsPerMatch = static_cast<double>(stats.scoringPoints*stats.minutes_played_count/minutes_dur) / stats.matchesPlayed;
-                    savesPerMatch = static_cast<double>(stats.defendingPoints*stats.minutes_played_count/minutes_dur) / stats.matchesPlayed;
+                    goalsPerMatch = static_cast<double>(stats.scoringPoints);//*stats.minutes_played_count/minutes_dur) / stats.matchesPlayed;
+                    savesPerMatch = static_cast<double>(stats.defendingPoints);//*stats.minutes_played_count/minutes_dur) / stats.matchesPlayed;
                     winPercentage = (static_cast<double>(stats.matchesWon) / stats.matches_participated) * 100.0;
                 }
 
