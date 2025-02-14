@@ -143,6 +143,8 @@ bool getPlayerFromFile(const std::string& fileName, const std::string& partialNa
     return false;
 }
 
+// Maps a player's name to whether they have voted (true) for /mix
+std::unordered_map<std::string, bool> m_mix_voters;
 
 std::vector<std::string> tips; // vector to store the tips
 std::string random_tip = "no tips for today, enjoy!";
@@ -502,7 +504,8 @@ void ServerLobby::updateTracksForMode()
     }
     lastJoinedName = "";
     lastLeftName = "";
-
+    m_mix_voters.clear();
+  
     // Read tips from the file
     std::ifstream file("tips.txt");
     if (file.is_open())
@@ -5474,6 +5477,127 @@ else if (argv[0] == "teams")
         delete result;
     }
 }
+
+else if ((argv[0] == "mix") || (argv[0] == "mixteams"))
+{
+    // 1) Only allow /mix if the game hasn't started yet
+    if (m_state.load() != WAITING_FOR_START_GAME)
+    {
+        send_private_message("Cannot use /mix once the game has started.", peer);
+        return;
+    }
+
+    // 2) Get the current player's name
+    auto profiles = peer->getPlayerProfiles();
+    if (profiles.empty())
+    {
+        send_private_message("Cannot retrieve your profile.", peer);
+        return;
+    }
+    std::string player_name = StringUtils::wideToUtf8(profiles[0]->getName());
+
+    // 3) Check whether they already voted
+    auto it = m_mix_voters.find(player_name);
+    if (it != m_mix_voters.end() && it->second)
+    {
+        // Already voted
+        send_private_message("You have already voted /mix.", peer);
+        return;
+    }
+
+    // 4) Record the player's vote
+    m_mix_voters[player_name] = true;
+
+    // 5) Count total active (non-spectator) players
+    auto all_peers = STKHost::get()->getPeers();
+    int total_active_players = 0;
+    for (auto& p : all_peers)
+    {
+        // Skip spectators for threshold
+        if (!p->alwaysSpectate() && !p->isSpectator())
+        {
+            total_active_players++;
+        }
+    }
+
+    // 6) Count how many votes we have
+    int current_votes = 0;
+    for (const auto &kv : m_mix_voters)
+    {
+        if (kv.second) current_votes++;
+    }
+
+    // 7) Broadcast the new vote count to everyone
+    {
+        std::stringstream ss;
+        ss <<"\U0001f5f3\uFE0F "<< player_name << " voted /mix. There are "
+           << current_votes << " total /mix votes.";
+        send_message(ss.str());  // This goes to ALL peers
+    }
+
+    // 8) Check if > 50% have voted ( >50% means votes*2 > total_active )
+    if (current_votes * 2 > total_active_players)
+    {
+        // Enough votes -> perform the "mix"
+        //  - gather non-spectator players
+        //  - sort by descending rank
+        //  - assign them Red, Blue, Red, Blue, etc.
+        //  - broadcast success
+        //  - reset votes
+
+        struct RankedPlayer
+        {
+            std::shared_ptr<STKPeer> peer;
+            int rank;
+        };
+        std::vector<RankedPlayer> ranked_players;
+
+        for (auto& p : all_peers)
+        {
+            // Skip spectators
+            if (p->alwaysSpectate() || p->isSpectator())
+                continue;
+
+            auto p_profiles = p->getPlayerProfiles();
+            if (p_profiles.empty())
+                continue;
+
+            std::string p_name = StringUtils::wideToUtf8(p_profiles[0]->getName());
+            auto info = getPlayerInfo(p_name); // returns {rank, score}
+            int rank = (info.first < 0) ? 0 : info.first; // treat missing rank as 0
+            ranked_players.push_back({ p, rank });
+        }
+
+        // Sort descending by rank
+        std::sort(ranked_players.begin(), ranked_players.end(),
+                  [](const RankedPlayer &a, const RankedPlayer &b)
+                  {
+                      return a.rank > b.rank; // highest rank first
+                  });
+
+        // Assign teams in alternating fashion:
+        //   index 0 -> red, index 1 -> blue, index 2 -> red, etc.
+        for (size_t i = 0; i < ranked_players.size(); i++)
+        {
+            KartTeam new_team = (i % 2 == 0) ? KART_TEAM_RED : KART_TEAM_BLUE;
+            auto &rp_profiles = ranked_players[i].peer->getPlayerProfiles();
+            if (!rp_profiles.empty())
+            {
+                rp_profiles[0]->setTeam(new_team);
+            }
+        }
+
+        // Update final assignments
+        updatePlayerList();
+
+        // Broadcast success
+        send_message("Teams have been mixed according to ranking!");
+
+        // Reset votes
+        m_mix_voters.clear();
+    }
+}
+  
 else if (argv[0] == "rank")
     {
         if (argv.size() < 2)
@@ -6308,4 +6432,16 @@ for (auto& p : peers)
     p->sendPacket(chat, true /* reliable */);
 delete chat;
 
+}
+void ServerLobby::send_private_message(const std::string &msg, std::shared_ptr<STKPeer> target_peer)
+{
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+    chat->encodeString16(StringUtils::utf8ToWide(msg));
+
+    // Send only to the specified peer
+    target_peer->sendPacket(chat, true /* reliable */);
+
+    delete chat;
 }
