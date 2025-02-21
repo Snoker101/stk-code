@@ -186,6 +186,7 @@ public:
 };   // class PowerupManager
 
 void set_powerup_multiplier(unsigned int value);
+unsigned int powerup_multiplier_value();
 
 extern PowerupManager* powerup_manager;
 
