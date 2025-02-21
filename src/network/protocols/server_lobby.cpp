@@ -1947,6 +1947,18 @@ void ServerLobby::finishedLoadingLiveJoinClient(Event* event)
     delete ns;
     updatePlayerList();
     peer->updateLastActivity();
+  
+   if ((!spectator) && (m_state.load() == RACING) && (powerup_multiplier_value() == 3) && (!losing_team_weaker()))
+        {
+            set_powerup_multiplier(1);
+            send_message("Powerupper is OFF (automatically)");
+        }
+    else if ((!spectator) && (m_state.load() == RACING) && (powerup_multiplier_value() == 1) && (losing_team_weaker()) && (abs(getSoccerScoreDifference()) > 3))
+        {
+            set_powerup_multiplier(3);
+            send_message("Powerupper is ON (automatically)");
+        }
+  
 }   // finishedLoadingLiveJoinClient
 
 //-----------------------------------------------------------------------------
@@ -2901,6 +2913,18 @@ void ServerLobby::clientDisconnected(Event* event)
         std::string name = StringUtils::wideToUtf8(p->getName());
         msg->encodeString(name);
         Log::info("ServerLobby", "%s disconnected", name.c_str());
+      
+     if ((m_state.load() == RACING) && (powerup_multiplier_value() == 3) && (!losing_team_weaker()))
+        {
+            set_powerup_multiplier(1);
+            send_message("Powerupper is OFF (automatically)");
+        }
+    else if ((m_state.load() == RACING) && (powerup_multiplier_value() == 1) && (losing_team_weaker()) && (abs(getSoccerScoreDifference()) > 3))
+        {
+            set_powerup_multiplier(3);
+            send_message("Powerupper is ON (automatically)");
+        }
+      
     }
 
     // Don't show waiting peer disconnect message to in game player
@@ -4959,6 +4983,16 @@ void ServerLobby::clientInGameWantsToBackLobby(Event* event)
     m_game_setup->addServerInfo(server_info);
     peer->sendPacket(server_info, /*reliable*/true);
     delete server_info;
+  if ((m_state.load() == RACING) && (powerup_multiplier_value() == 3) && (!losing_team_weaker()))
+        {
+            set_powerup_multiplier(1);
+            send_message("Powerupper is OFF (automatically)");
+        }
+    else if ((m_state.load() == RACING) && (powerup_multiplier_value() == 1) && (losing_team_weaker()) && (abs(getSoccerScoreDifference()) > 3))
+        {
+            set_powerup_multiplier(3);
+            send_message("Powerupper is ON (automatically)");
+        }
 }   // clientInGameWantsToBackLobby
 
 //-----------------------------------------------------------------------------
@@ -5406,27 +5440,34 @@ else if (argv[0] == "teams")
         auto profiles = player_peer->getPlayerProfiles();
         if (!profiles.empty())
         {
+            // Skip spectators
             if (player_peer->alwaysSpectate() || player_peer->isSpectator()) continue;
 
-                std::string player_name = StringUtils::wideToUtf8(profiles[0]->getName());  // Get the player's name
-                KartTeam current_team = profiles[0]->getTeam();  // Get the player's team
+            std::string player_name = StringUtils::wideToUtf8(profiles[0]->getName());
+            KartTeam current_team = profiles[0]->getTeam();
 
-                // Get the player's score
-                std::pair<int, int> player_info = getPlayerInfo(player_name);
-                int player_score = 0;
-                if (player_info.second > 0)
-                    player_score = player_info.second;
+            // Get the player's score
+            std::pair<int, int> player_info = getPlayerInfo(player_name);
+            int player_score;
+            // If the player_info.second (score) is negative (e.g., -1), assign 20 points
+            if (player_info.second < 0)
+            {
+                player_score = 20; // Default score
+            }
+            else
+            {
+                player_score = player_info.second;
+            }
 
-                // Add the player's score to the appropriate team
-                if (current_team == KartTeam::KART_TEAM_RED)
-                {
-                    red_team_score += player_score;
-                }
-                else if (current_team == KartTeam::KART_TEAM_BLUE)
-                {
-                    blue_team_score += player_score;
-                }
-
+            // Add the player's score to the appropriate team
+            if (current_team == KartTeam::KART_TEAM_RED)
+            {
+                red_team_score += player_score;
+            }
+            else if (current_team == KartTeam::KART_TEAM_BLUE)
+            {
+                blue_team_score += player_score;
+            }
         }
     }
 
@@ -5437,16 +5478,16 @@ else if (argv[0] == "teams")
     {
         // Calculate the percentage of each team
         int red_percentage = (red_team_score * 100) / total_score;
-        int blue_percentage = 100 - red_percentage;  // The rest goes to the blue team
+        int blue_percentage = 100 - red_percentage;
 
-        // Calculate the number of squares for each team (round to the nearest whole number)
-        int red_squares = (red_percentage + 5) / 10;  // Round to nearest integer
-        int blue_squares = 10 - red_squares;          // Remaining squares go to the blue team
+        // Calculate the number of squares for each team (rounded)
+        int red_squares = (red_percentage + 5) / 10;
+        int blue_squares = 10 - red_squares;
 
         // Create the visualization using square emojis
         std::wstring visualization;
-        visualization.append(red_squares, L'\U0001F7E5');  // Red squares 🟥
-        visualization.append(blue_squares, L'\U0001F7E6'); // Blue squares 🟦
+        visualization.append(red_squares, L'\U0001F7E5');  // Red squares
+        visualization.append(blue_squares, L'\U0001F7E6'); // Blue squares
 
         // Create the result message
         std::wstring result_msg = L"   Red " + std::to_wstring(red_percentage) + L"% - " +
@@ -5478,16 +5519,16 @@ else if (argv[0] == "teams")
     }
 }
 
-else if ((argv[0] == "mix") || (argv[0] == "mixteams"))
+else if ((argv[0] == "mix") || (argv[0] == "autoteams") || (argv[0] == "randomteams"))
 {
-    // 1) Only allow /mix if the game hasn't started yet
+    // 1) Only allow /mix before the game starts
     if (m_state.load() != WAITING_FOR_START_GAME)
     {
         send_private_message("Cannot use /mix once the game has started.", peer);
         return;
     }
 
-    // 2) Get the current player's name
+    // 2) Get this player's name
     auto profiles = peer->getPlayerProfiles();
     if (profiles.empty())
     {
@@ -5496,67 +5537,61 @@ else if ((argv[0] == "mix") || (argv[0] == "mixteams"))
     }
     std::string player_name = StringUtils::wideToUtf8(profiles[0]->getName());
 
-    // 3) Check whether they already voted
+    // 3) Check if this player already voted
     auto it = m_mix_voters.find(player_name);
     if (it != m_mix_voters.end() && it->second)
     {
-        // Already voted
         send_private_message("You have already voted /mix.", peer);
         return;
     }
 
-    // 4) Record the player's vote
+    // 4) Record the vote
     m_mix_voters[player_name] = true;
 
-    // 5) Count total active (non-spectator) players
+    // 5) Count how many active (non-spectator) players we have
     auto all_peers = STKHost::get()->getPeers();
     int total_active_players = 0;
     for (auto& p : all_peers)
     {
-        // Skip spectators for threshold
+        // Skip spectators
         if (!p->alwaysSpectate() && !p->isSpectator())
-        {
             total_active_players++;
-        }
     }
 
-    // 6) Count how many votes we have
+    // 6) Count current votes
     int current_votes = 0;
     for (const auto &kv : m_mix_voters)
     {
         if (kv.second) current_votes++;
     }
 
-    // 7) Broadcast the new vote count to everyone
+    // 7) Broadcast the updated vote count to all
     {
         std::stringstream ss;
         ss <<"\U0001f5f3\uFE0F "<< player_name << " voted /mix. There are "
-           << current_votes << " total /mix votes.";
-        send_message(ss.str());  // This goes to ALL peers
+           << current_votes << " total votes.";
+        send_message(ss.str());
     }
 
-    // 8) Check if > 50% have voted ( >50% means votes*2 > total_active )
+    // 8) Check if votes exceed 50% of the active players
+    // For example, if total_active_players=6, we need 4 votes (4*2=8 > 6)
     if (current_votes * 2 > total_active_players)
     {
-        // Enough votes -> perform the "mix"
-        //  - gather non-spectator players
-        //  - sort by descending rank
-        //  - assign them Red, Blue, Red, Blue, etc.
-        //  - broadcast success
-        //  - reset votes
+        // Enough votes -> perform the team mix
 
+        // A) Gather all non-spectators, with rank & points from getPlayerInfo()
         struct RankedPlayer
         {
             std::shared_ptr<STKPeer> peer;
-            int rank;
+            int rank;    // info.first
+            int points;  // info.second
         };
         std::vector<RankedPlayer> ranked_players;
 
         for (auto& p : all_peers)
         {
-            // Skip spectators
             if (p->alwaysSpectate() || p->isSpectator())
-                continue;
+                continue; // skip spectators
 
             auto p_profiles = p->getPlayerProfiles();
             if (p_profiles.empty())
@@ -5564,36 +5599,77 @@ else if ((argv[0] == "mix") || (argv[0] == "mixteams"))
 
             std::string p_name = StringUtils::wideToUtf8(p_profiles[0]->getName());
             auto info = getPlayerInfo(p_name); // returns {rank, score}
-            int rank = (info.first < 0) ? 0 : info.first; // treat missing rank as 0
-            ranked_players.push_back({ p, rank });
+            int rank_val   = (info.first  < 0) ? 0 : info.first;
+            int points_val = (info.second < 0) ? 20 : info.second;
+
+            ranked_players.push_back({ p, rank_val, points_val });
         }
 
-        // Sort descending by rank
+        // B) Sort them ascending by rank
         std::sort(ranked_players.begin(), ranked_players.end(),
-                  [](const RankedPlayer &a, const RankedPlayer &b)
-                  {
-                      return a.rank > b.rank; // highest rank first
-                  });
+    [](const RankedPlayer &a, const RankedPlayer &b)
+    {
+        return a.rank < b.rank; // lowest rank first (ascending)
+    });
 
-        // Assign teams in alternating fashion:
-        //   index 0 -> red, index 1 -> blue, index 2 -> red, etc.
-        for (size_t i = 0; i < ranked_players.size(); i++)
+
+        // C) Decide randomly whether to start with red or blue
+        bool start_red = (std::rand() % 2 == 0);
+
+        // We'll track total points for each team
+        int sum_points_red  = 0;
+        int sum_points_blue = 0;
+
+        size_t total_players = ranked_players.size();
+        bool has_odd_count   = (total_players % 2 == 1);
+        size_t limit         = has_odd_count ? total_players - 1 : total_players;
+
+        // D) Assign all but the last (if odd) in an alternating pattern
+        for (size_t i = 0; i < limit; i++)
         {
-            KartTeam new_team = (i % 2 == 0) ? KART_TEAM_RED : KART_TEAM_BLUE;
-            auto &rp_profiles = ranked_players[i].peer->getPlayerProfiles();
-            if (!rp_profiles.empty())
+            // Even indices use start_red, odd indices the opposite
+            bool is_red = (i % 2 == 0) ? start_red : !start_red;
+            KartTeam new_team = is_red ? KART_TEAM_RED : KART_TEAM_BLUE;
+
+            auto &prof = ranked_players[i].peer->getPlayerProfiles();
+            if (!prof.empty())
             {
-                rp_profiles[0]->setTeam(new_team);
+                prof[0]->setTeam(new_team);
+
+                if (new_team == KART_TEAM_RED)
+                    sum_points_red += ranked_players[i].points;
+                else
+                    sum_points_blue += ranked_players[i].points;
             }
         }
 
-        // Update final assignments
+        // E) If there's an odd leftover player, place them on the team with fewer points
+        if (has_odd_count)
+        {
+            size_t leftover_index = total_players - 1;
+            auto & leftover_prof = ranked_players[leftover_index].peer->getPlayerProfiles();
+            if (!leftover_prof.empty())
+            {
+                if (sum_points_red <= sum_points_blue)
+                {
+                    leftover_prof[0]->setTeam(KART_TEAM_RED);
+                    sum_points_red += ranked_players[leftover_index].points;
+                }
+                else
+                {
+                    leftover_prof[0]->setTeam(KART_TEAM_BLUE);
+                    sum_points_blue += ranked_players[leftover_index].points;
+                }
+            }
+        }
+
+        // F) Apply final team assignments
         updatePlayerList();
 
-        // Broadcast success
+        // G) Broadcast success
         send_message("Teams have been mixed according to ranking!");
 
-        // Reset votes
+        // H) Reset votes
         m_mix_voters.clear();
     }
 }
@@ -6444,4 +6520,97 @@ void ServerLobby::send_private_message(const std::string &msg, std::shared_ptr<S
     target_peer->sendPacket(chat, true /* reliable */);
 
     delete chat;
+}
+
+bool ServerLobby::losing_team_weaker()
+{
+    // 1) Must be racing
+    if (m_state.load() != RACING)
+    {
+        return false;
+    }
+
+    // 2) Sum the ranking points of each team,
+    //    ignoring spectators or players still waiting for the game.
+    int red_team_points  = 0;
+    int blue_team_points = 0;
+
+    // Gather all peers
+    auto peers = STKHost::get()->getPeers();
+    for (auto& player_peer : peers)
+    {
+        // Skip spectators and players waiting for game
+        if (player_peer->alwaysSpectate() || player_peer->isSpectator())  continue;
+        if (player_peer->isWaitingForGame())                               continue;
+
+        // Get the slot's first profile
+        auto profiles = player_peer->getPlayerProfiles();
+        if (!profiles.empty())
+        {
+            std::string player_name = StringUtils::wideToUtf8(profiles[0]->getName());
+            KartTeam    current_team = profiles[0]->getTeam();
+
+            // Retrieve player's ranking info
+            std::pair<int, int> player_info = getPlayerInfo(player_name);
+            int player_score = (player_info.second < 0) ? 20 : player_info.second;
+
+            // Tally scores by team
+            if (current_team == KART_TEAM_RED)
+                red_team_points += player_score;
+            else if (current_team == KART_TEAM_BLUE)
+                blue_team_points += player_score;
+        }
+    }
+
+    // 3) Check current SoccerWorld scores to see which team is losing
+    SoccerWorld* sw = (SoccerWorld*)World::getWorld();
+    if (!sw)  // Safety check
+    {
+        return false;
+    }
+    const int red_score  = sw->getScore(KART_TEAM_RED);
+    const int blue_score = sw->getScore(KART_TEAM_BLUE);
+
+    // If both teams are tied, there's no "losing" team
+    if (red_score == blue_score) return false;
+
+    // Identify losing team based on SoccerWorld's scoreboard
+    bool red_is_losing = (red_score < blue_score);
+    // If red is losing but also has fewer total ranking points => true
+    if (red_is_losing && red_team_points < blue_team_points)
+    {
+        return true;
+    }
+    // If blue is losing but also has fewer total ranking points => true
+    bool blue_is_losing = (blue_score < red_score);
+    if (blue_is_losing && blue_team_points < red_team_points)
+    {
+        return true;
+    }
+
+    // Otherwise, losing team's total ranking points are not strictly less
+    return false;
+}
+
+int ServerLobby::getSoccerScoreDifference() const
+{
+    // Ensure the game is in RACING state
+    if (m_state.load() != RACING)
+    {
+        return 0;
+    }
+
+    // Retrieve the SoccerWorld
+    SoccerWorld* sw = dynamic_cast<SoccerWorld*>(World::getWorld());
+    if (!sw)
+    {
+        return 0;
+    }
+
+    // Get each team's current score
+    int red_score  = sw->getScore(KART_TEAM_RED);
+    int blue_score = sw->getScore(KART_TEAM_BLUE);
+
+    // Return the difference (red minus blue)
+    return red_score - blue_score;
 }
