@@ -323,6 +323,8 @@ public:
     void startSelection(const Event *event=NULL);
     void send_message(std::string msg);
     void send_private_message(const std::string &msg, std::shared_ptr<STKPeer> target_peer);
+    bool losing_team_weaker();
+    int getSoccerScoreDifference() const;
     void checkIncomingConnectionRequests();
     void finishedLoadingWorld() OVERRIDE;
     ServerState getCurrentState() const { return m_state.load(); }
