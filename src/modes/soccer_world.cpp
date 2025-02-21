@@ -625,27 +625,27 @@ void SoccerWorld::update(int ticks)
                 {
                     m_kart_scores[m_ball_hitter].attacking_pts += 1;
                     m_kart_scores[m_ball_hitter].total_pts     += 1;
-                    Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at opponent goal");
+                   // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at opponent goal");
                 }
                 else if ((approaching_hitter_goal) && (!m_previous_approaching_hitter))
                 {
                     m_kart_scores[m_ball_hitter].bad_play_pts += -1;
                     m_kart_scores[m_ball_hitter].total_pts    += -1;
-                    Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at his goal");
+                  //  Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at his goal");
                 }
                 else if ((m_previous_approaching_hitter) && (!approaching_hitter_goal) && isBallBetweenRedAndBlueGates())
                 {
                     // Defended your own goal
                     m_kart_scores[m_ball_hitter].defending_pts += 1;
                     m_kart_scores[m_ball_hitter].total_pts     += 1;
-                    Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "Defended his goal");
+                   // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "Defended his goal");
                 }
                 else if ((m_previous_approaching_opponent) && (!approaching_opponent_goal) && isBallBetweenRedAndBlueGates())
                 {
                     // Defended opponent's goal
                     m_kart_scores[m_ball_hitter].bad_play_pts += -1;
                     m_kart_scores[m_ball_hitter].total_pts    += -1;
-                    Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "Defended/missed opponent goal");
+                    //Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "Defended/missed opponent goal");
                 }
             }
 
@@ -764,6 +764,7 @@ void SoccerWorld::update(int ticks)
 //-----------------------------------------------------------------------------
 void SoccerWorld::onCheckGoalTriggered(bool first_goal)
 {
+    auto sl = LobbyProtocol::get<ServerLobby>();
     if (isRaceOver() || isStartPhase() ||
         (NetworkConfig::get()->isNetworking() &&
         NetworkConfig::get()->isClient()))
@@ -797,7 +798,7 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
 
         m_kart_scores[m_ball_hitter].scoring_pts += 1;
         m_kart_scores[m_ball_hitter].total_pts   += 1;
-        Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "scored a goal!!");
+        // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "scored a goal!!");
 
         ScorerData sd = {};
         sd.m_id = m_ball_hitter;
@@ -899,20 +900,33 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         m_goal_transforms[i] = kart->getBody()->getWorldTransform();
     }
 
-    if((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 4) && (once == 1) && (!isRaceOver()))
+    if((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 4) && (powerup_multiplier_value() == 1) && (!isRaceOver()) && (once == 1))
     {
+        if (sl->losing_team_weaker())
+        {
         set_powerup_multiplier(3);
-        auto sl = LobbyProtocol::get<ServerLobby>();
-        if (once ==1)
             sl->send_message("Powerupper on (automatically)");
-        once = 2;
+            once =2;
+        }
     }
+
+    if ((once == 2) && (powerup_multiplier_value() == 1) && (sl->losing_team_weaker()))
+    {
+    set_powerup_multiplier(3);
+        sl->send_message("Powerupper on (automatically)");
+    }
+
+    if ((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) != 0) && (powerup_multiplier_value() == 3) && (!sl->losing_team_weaker()))
+    {
+    set_powerup_multiplier(1);
+        sl->send_message("Powerupper off (automatically)");
+    }
+
     if(getScore(KART_TEAM_BLUE) == 5 && once_blue_five == 1 )
     {
         auto poss = getBallPossession();
         int red_possession  = poss.first;
         int blue_possession = poss.second;
-        auto sl = LobbyProtocol::get<ServerLobby>();
         sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
 
         once_blue_five = 2;
@@ -922,7 +936,6 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         auto poss = getBallPossession();
         int red_possession  = poss.first;
         int blue_possession = poss.second;
-        auto sl = LobbyProtocol::get<ServerLobby>();
         sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
 
         once_red_five = 2;
@@ -932,7 +945,6 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         auto poss = getBallPossession();
         int red_possession  = poss.first;
         int blue_possession = poss.second;
-        auto sl = LobbyProtocol::get<ServerLobby>();
         sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
     }
 
@@ -1374,7 +1386,7 @@ void SoccerWorld::enterRaceOverState()
         {
             // If either team is missing, skip the ranking logic or just warn:
             Log::warn("SoccerWorld",
-                "Skipping text-file writes: not enough players in red/blue teams.");
+                "Skipping DB writes: not enough players in red/blue teams.");
         }
     else
         {
@@ -2046,6 +2058,7 @@ void SoccerWorld::getKartsDisplayInfo(
         }
     }
 }   // getKartsDisplayInfo
+
 std::pair<int, int> SoccerWorld::getBallPossession() const
 {
     int total = m_ball_possession_red + m_ball_possession_blue;
