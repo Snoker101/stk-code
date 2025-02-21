@@ -94,6 +94,11 @@ void set_powerup_multiplier(unsigned int value)
     set_nitro_multiplier(0);
 }
 
+unsigned int powerup_multiplier_value()
+{
+    return powerup_multiplier;
+}
+
 //-----------------------------------------------------------------------------
 /** Removes any textures so that they can be reloaded.
  */
