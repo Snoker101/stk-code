@@ -290,6 +290,10 @@ namespace ServerConfig
         "Time in seconds to deactivate a flag when it's captured or returned "
         "to own base by players."));
 
+    SERVER_CFG_PREFIX IntServerConfigParam m_pros_limit
+        SERVER_CFG_DEFAULT(IntServerConfigParam(0, "pros-limit",
+        "set 0 if allow all players. Set number to allow top number only."));
+
     SERVER_CFG_PREFIX IntServerConfigParam m_hit_limit
         SERVER_CFG_DEFAULT(IntServerConfigParam(20, "hit-limit",
         "Hit limit of free for all, zero to disable hit limit."));
