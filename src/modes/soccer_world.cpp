@@ -57,6 +57,14 @@
 #include <sstream>
 #include <map>
 
+
+#include <cassert>
+#include <iostream>
+#include <vector>
+#include <ctime>
+#include <cstdio>       // for rename()
+#include <dirent.h>     // for opendir(), readdir(), closedir()
+
 #include "sqlite3.h" //  You will have to install the package libsqlite3-dev. For ubuntu: "sudo apt install libsqlite3-dev"
                     // and build game with sqlite3 on: "cmake .. -DNO_SHADERC=on ENABLE_SQLITE3"
 
@@ -71,7 +79,7 @@ namespace
     // These "getter" functions return whichever field we want.
     int getTotalPts   (const KartScore &k) { return k.total_pts;    }
     int getAttacking  (const KartScore &k) { return k.attacking_pts;}
-    int getDefending  (const KartScore &k) { return k.defending_pts;}
+    int getDefending  (const KartScore &k) { return k.defending_pts + k.inddefending_pts;}
     int getScoring    (const KartScore &k) { return k.scoring_pts;  }
 
     // This function scans all `KartScore` objects, finds the maximum value
@@ -384,6 +392,9 @@ void SoccerWorld::init()
     m_previous_approaching_hitter   = false;
     m_previous_approaching_opponent = false;
 
+    m_previous_approaching_hitter_half   = false;
+    m_previous_approaching_opponent_half = false;
+
     // For each kart, record its name and zero the score
     for (unsigned int i = 0; i < m_karts.size(); i++)
     {
@@ -591,6 +602,7 @@ void SoccerWorld::update(int ticks)
         if ((m_ball_hitter >= 0) && (m_ball_hitter < (int)m_karts.size()))
         {
              KartTeam hitter_team = getKartTeam(m_ball_hitter);
+             KartTeam opponent_team = (hitter_team == KART_TEAM_RED) ? KART_TEAM_BLUE : KART_TEAM_RED;
 
             // Each frame that the ball is “owned” by a team, add 1 to that team’s counter
             if (hitter_team == KART_TEAM_RED)
@@ -603,12 +615,17 @@ void SoccerWorld::update(int ticks)
             }
 
             bool approaching_hitter_goal   = isBallMovingTowardGoal(hitter_team);
-            bool approaching_opponent_goal = isBallMovingTowardGoal(
-                (hitter_team == KART_TEAM_RED) ? KART_TEAM_BLUE : KART_TEAM_RED);
+            bool approaching_opponent_goal = isBallMovingTowardGoal(opponent_team);
+
+            bool approaching_hitter_half  = isBallMovingTowardHalf(hitter_team);
+            bool approaching_opponent_half = isBallMovingTowardHalf(opponent_team);
 
             bool hitter_changed = (m_ball_hitter != m_previous_ball_hitter);
             bool hitter_goal_changed  = (approaching_hitter_goal   != m_previous_approaching_hitter);
             bool opponent_goal_changed = (approaching_opponent_goal != m_previous_approaching_opponent);
+
+            bool hitter_half_changed  = (approaching_hitter_half   != m_previous_approaching_hitter_half);
+            bool opponent_half_changed = (approaching_opponent_half != m_previous_approaching_opponent_half);
 
             bool temp_bool = false;
             if (getKartTeam(m_ball_hitter) != getKartTeam(m_previous_ball_hitter))
@@ -616,6 +633,10 @@ void SoccerWorld::update(int ticks)
                 temp_bool = m_previous_approaching_hitter;
                 m_previous_approaching_hitter = m_previous_approaching_opponent;
                 m_previous_approaching_opponent = temp_bool;
+
+                temp_bool = m_previous_approaching_hitter_half;
+                m_previous_approaching_hitter_half = m_previous_approaching_opponent_half;
+                m_previous_approaching_opponent_half = temp_bool;
             }
 
             // If either the ball hitter or 'approaching' flags changed, update scoring
@@ -640,7 +661,7 @@ void SoccerWorld::update(int ticks)
                     m_kart_scores[m_ball_hitter].total_pts     += 1;
                    // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "Defended his goal");
                 }
-                else if ((m_previous_approaching_opponent) && (!approaching_opponent_goal) && isBallBetweenRedAndBlueGates())
+                else if ((m_previous_approaching_opponent) && (!approaching_opponent_goal) && (hitter_changed) && (isBallBetweenRedAndBlueGates()))
                 {
                     // Defended opponent's goal
                     m_kart_scores[m_ball_hitter].bad_play_pts += -1;
@@ -648,11 +669,29 @@ void SoccerWorld::update(int ticks)
                     //Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "Defended/missed opponent goal");
                 }
             }
+            else if ((hitter_changed || hitter_half_changed || opponent_half_changed) && (!RewindManager::get()->isRewinding()))
+            {
+                if (approaching_opponent_half)
+                {
+                   m_kart_scores[m_ball_hitter].inddefending_pts += 1;
+                   m_kart_scores[m_ball_hitter].total_pts     += 1;
+                  // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at opponent half");
+                }
+                else if ((approaching_hitter_half) && (!m_previous_approaching_hitter_half))
+                {
+                    m_kart_scores[m_ball_hitter].bad_play_pts += -1;
+                    m_kart_scores[m_ball_hitter].total_pts    += -1;
+                   // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at his half");
+                }
+            }
 
             // Save state for next scoring check
             m_previous_ball_hitter          = m_ball_hitter;
             m_previous_approaching_hitter   = approaching_hitter_goal;
             m_previous_approaching_opponent = approaching_opponent_goal;
+
+            m_previous_approaching_hitter_half   = approaching_hitter_half;
+            m_previous_approaching_opponent_half = approaching_opponent_half;
         }
         else
         {
@@ -660,6 +699,9 @@ void SoccerWorld::update(int ticks)
             m_previous_ball_hitter          = -1;
             m_previous_approaching_hitter   = false;
             m_previous_approaching_opponent = false;
+
+            m_previous_approaching_hitter_half   = false;
+            m_previous_approaching_opponent_half = false;
         }
     }
     // -------------------------------------------------------------------------
@@ -910,13 +952,13 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         }
     }
 
-    if ((once == 2) && (powerup_multiplier_value() == 1) && (sl->losing_team_weaker()))
+    if ((once == 2) && (powerup_multiplier_value() == 1) && (sl->losing_team_weaker()) && (!isRaceOver()))
     {
     set_powerup_multiplier(3);
         sl->send_message("Powerupper on (automatically)");
     }
 
-    if ((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) != 0) && (powerup_multiplier_value() == 3) && (!sl->losing_team_weaker()))
+    if ((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) != 0) && (powerup_multiplier_value() == 3) && (!sl->losing_team_weaker()) && (!isRaceOver()))
     {
     set_powerup_multiplier(1);
         sl->send_message("Powerupper off (automatically)");
@@ -1364,6 +1406,106 @@ void SoccerWorld::enterRaceOverState()
 
     if(write_once == 1)
     {
+            // --- Reset ranking monthly Begins Here ---
+
+    // (1) Read all file names in the current directory.
+    std::vector<std::string> directoryFiles;
+    DIR* dir = opendir(".");
+    if (dir != NULL)
+    {
+        struct dirent* ent;
+        while ((ent = readdir(dir)) != NULL)
+        {
+            directoryFiles.push_back(std::string(ent->d_name));
+        }
+        closedir(dir);
+    }
+    else
+    {
+        Log::warn("SoccerWorld", "Could not open the current directory");
+    }
+
+    // (2) Get current month and year, then deduce the previous month (adjust year if needed).
+    std::time_t t_now = std::time(nullptr);
+    std::tm* tm_info = std::localtime(&t_now);
+    int currMonth = tm_info->tm_mon; // tm_mon in range [0, 11]
+    int currYear = tm_info->tm_year + 1900;
+
+    int prevMonth, prevYear;
+    if (currMonth == 0) // January: previous is December of the previous year
+    {
+        prevMonth = 11;
+        prevYear = currYear - 1;
+    }
+    else
+    {
+        prevMonth = currMonth - 1;
+        prevYear = currYear;
+    }
+    const char* month_names[12] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    std::string monthSuffix = std::string(month_names[prevMonth]) + "_" + std::to_string(prevYear);
+
+    // (3) List of target files to be renamed.
+    std::vector<std::string> targetFiles;
+    targetFiles.push_back("soccer_ranking.txt");
+    targetFiles.push_back("soccer_ranking_detailed.txt");
+    targetFiles.push_back("soccer_ranking_detailed.db");
+    targetFiles.push_back("db_table_copy.txt");
+    targetFiles.push_back("colallstats.txt");
+
+    // (4) For each file, if it exists in the directory, construct a new name by appending "_" + monthSuffix
+    // before the extension and rename it (only if the new name doesn't already exist).
+    for (size_t i = 0; i < targetFiles.size(); ++i)
+    {
+        const std::string &oldName = targetFiles[i];
+        // Check if the file exists in the current directory.
+        if (std::find(directoryFiles.begin(), directoryFiles.end(), oldName) != directoryFiles.end())
+        {
+            // Construct new name: insert "_" + monthSuffix before the file extension.
+            std::string newName;
+            size_t pos = oldName.rfind('.');
+            if (pos != std::string::npos)
+            {
+                newName = oldName.substr(0, pos) + "_" + monthSuffix + oldName.substr(pos);
+            }
+            else
+            {
+                newName = oldName + "_" + monthSuffix;
+            }
+
+            // Check if the new name already exists.
+            if (std::find(directoryFiles.begin(), directoryFiles.end(), newName) == directoryFiles.end())
+            {
+                // Attempt to rename the file.
+                if (std::rename(oldName.c_str(), newName.c_str()) == 0)
+                {
+                    Log::info("SoccerWorld", ("Renamed " + oldName + " to " + newName).c_str());
+                    // Optionally update the directoryFiles vector.
+                    directoryFiles.push_back(newName);
+                }
+                else
+                {
+                    Log::warn("SoccerWorld", ("Failed renaming " + oldName + " to " + newName).c_str());
+                }
+            }
+            else
+            {
+                Log::info("SoccerWorld", (newName + " already exists, skipping rename.").c_str());
+            }
+        }
+        else
+        {
+            Log::info("SoccerWorld", (oldName + " does not exist in the current directory, skipping.").c_str());
+        }
+    }
+
+    // --- Reset ranking monthly Ends Here ---
+
+
+
         // Now figure out how many seconds the match lasted
         float final_time_secs = getTime();  // total match time in seconds
     // ─────────────────────────────────────────────
@@ -1412,6 +1554,7 @@ void SoccerWorld::enterRaceOverState()
           "  ScoringPts      INTEGER,"
           "  AttackingPts    INTEGER,"
           "  DefendingPts    INTEGER,"
+          "  IndDefendingPts    INTEGER,"
           "  BadPlayPts      INTEGER,"
           "  Total           INTEGER,"
           "  Rank            INTEGER,"
@@ -1443,13 +1586,14 @@ void SoccerWorld::enterRaceOverState()
 
             const char* upsert_sql =
               "INSERT INTO players (PlayerName, ScoringPts, AttackingPts, "
-              "                     DefendingPts, BadPlayPts, Total, "
+              "                     DefendingPts, IndDefendingPts, BadPlayPts, Total, "
               "                     matches_played, matches_participated, matches_won, team_members_count, minutes_played_count) "
-              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
               "ON CONFLICT(PlayerName) DO UPDATE SET "
               "  ScoringPts      = players.ScoringPts      + excluded.ScoringPts, "
               "  AttackingPts    = players.AttackingPts    + excluded.AttackingPts, "
               "  DefendingPts    = players.DefendingPts    + excluded.DefendingPts, "
+              "  IndDefendingPts    = players.IndDefendingPts    + excluded.IndDefendingPts, "
               "  BadPlayPts      = players.BadPlayPts      + excluded.BadPlayPts, "
               "  Total           = players.Total           + excluded.Total, "
               "  matches_played  = players.matches_played  + excluded.matches_played, "
@@ -1511,6 +1655,18 @@ void SoccerWorld::enterRaceOverState()
 
                     int team_members_count_increment = getKartTeam(i) == KART_TEAM_RED ? red_count : blue_count;
 
+                    // If no points were awarded at all, set both increments to 0
+                    if (p.scoring_pts == 0 &&
+                        p.attacking_pts == 0 &&
+                        p.defending_pts == 0 &&
+                        p.bad_play_pts == 0)
+                    {
+                        matches_participated_increment = 0;
+                        match_won_increment = 0;
+                        team_members_count_increment =0;
+                        match_played_increment = 0.0f;
+                    }
+
                     // Bind columns
                     // 1) PlayerName
                     sqlite3_bind_text(stmt, 1, player_name.c_str(), -1, SQLITE_TRANSIENT);
@@ -1520,20 +1676,22 @@ void SoccerWorld::enterRaceOverState()
                     sqlite3_bind_int(stmt, 3, p.attacking_pts);
                     // 4) DefendingPts
                     sqlite3_bind_int(stmt, 4, p.defending_pts);
-                    // 5) BadPlayPts
-                    sqlite3_bind_int(stmt, 5, p.bad_play_pts);
-                    // 6) Total
-                    sqlite3_bind_int(stmt, 6, p.total_pts);
-                    // 7) matches_played
-                    sqlite3_bind_double(stmt, 7, match_played_increment);
-                    // 8) matches_participated
-                    sqlite3_bind_int(stmt, 8, matches_participated_increment);
-                    // 9) matches_won
-                    sqlite3_bind_int(stmt, 9, match_won_increment);
-                    // 10) team_members_count
-                    sqlite3_bind_int(stmt, 10, team_members_count_increment);
-                    // 11) minutes_played_count
-                    sqlite3_bind_double(stmt, 11, minutes_played_increment);
+                    // 5) IndDefendingPts
+                    sqlite3_bind_int(stmt, 5, p.inddefending_pts);
+                    // 6) BadPlayPts
+                    sqlite3_bind_int(stmt, 6, p.bad_play_pts);
+                    // 7) Total
+                    sqlite3_bind_int(stmt, 7, p.total_pts);
+                    // 8) matches_played
+                    sqlite3_bind_double(stmt, 8, match_played_increment);
+                    // 9) matches_participated
+                    sqlite3_bind_int(stmt, 9, matches_participated_increment);
+                    // 10) matches_won
+                    sqlite3_bind_int(stmt, 10, match_won_increment);
+                    // 11) team_members_count
+                    sqlite3_bind_int(stmt, 11, team_members_count_increment);
+                    // 12) minutes_played_count
+                    sqlite3_bind_double(stmt, 12, minutes_played_increment);
 
                     rc = sqlite3_step(stmt);
                     if (rc != SQLITE_DONE)
@@ -1705,7 +1863,7 @@ void SoccerWorld::enterRaceOverState()
                 oss << def_names[i];
             }
             lmfile << "Top defender: " << oss.str()
-                   << " (saves=" << def_val << ")\n";
+                   << " (direct & indirect saves=" << def_val << ")\n";
         }
 
         // Ball possession
@@ -1768,7 +1926,7 @@ void SoccerWorld::enterRaceOverState()
                     << ks.m_name << " "
                     << ks.scoring_pts << " "
                     << ks.attacking_pts << " "
-                    << ks.defending_pts << " "
+                    << ks.defending_pts + ks.inddefending_pts<< " "
                     << ks.bad_play_pts << " "
                     << ks.total_pts << "\n";
         }
@@ -1994,6 +2152,138 @@ bool SoccerWorld::isBallMovingTowardGoal(KartTeam team) const
             return true;
         }
     }
+
+    return false;
+}
+/*
+bool SoccerWorld::isBallMovingTowardHalf(KartTeam team) const
+{
+    // 1) Get the current ball position, velocity, and (assumed) initial position.
+    Vec3 ball_pos         = getBallPosition();
+    Vec3 ball_vel         = getBallVelocity();
+    Vec3 ball_initial_pos = ball_pos; // Assumes this function exists
+
+    // Optional: you may want to ignore cases where ball is barely moving.
+    // if (ball_vel.length_2d() < 15.0f)
+    //     return false;
+
+    // 2) Get this team's goal.
+    CheckGoal* team_goal = m_bgd->getCheckGoal(team);
+    if (!team_goal)
+    {
+        Log::warn("SoccerWorld", "isBallMovingTowardHalf: Missing CheckGoal pointer for team!");
+        return false;
+    }
+    Vec3 team_goal_first = team_goal->getPoint(CheckGoal::POINT_FIRST);
+    Vec3 team_goal_last  = team_goal->getPoint(CheckGoal::POINT_LAST);
+    Vec3 team_goal_mid   = (team_goal_first + team_goal_last) * 0.5f;
+
+    // 3) Determine the other team (assumes a two-team system).
+    KartTeam other_team;
+    if (team == KART_TEAM_RED)
+        other_team = KART_TEAM_BLUE;
+    else
+        other_team = KART_TEAM_RED;
+
+    CheckGoal* other_goal = m_bgd->getCheckGoal(other_team);
+    if (!other_goal)
+    {
+        Log::warn("SoccerWorld", "isBallMovingTowardHalf: Missing CheckGoal pointer for other team!");
+        return false;
+    }
+    Vec3 other_goal_first = other_goal->getPoint(CheckGoal::POINT_FIRST);
+    Vec3 other_goal_last  = other_goal->getPoint(CheckGoal::POINT_LAST);
+    Vec3 other_goal_mid   = (other_goal_first + other_goal_last) * 0.5f;
+
+    // 4) Ensure ball's initial position is closer to the other gate than to its own.
+    float distInitialToOther = (ball_initial_pos - other_goal_mid).length_2d();
+    float distInitialToTeam  = (ball_initial_pos - team_goal_mid).length_2d();
+    if (distInitialToOther >= distInitialToTeam)
+        return false;
+
+    // 5) Compute the half-field (midfield) point.
+    //     Here we use the midpoint between both teams' goal centers.
+    Vec3 half_point = (team_goal_mid + other_goal_mid) * 0.5f;
+
+    // 6) Check if the ball is heading towards the half.
+    //     We form a vector from the ball to the half point and take its dot product with the ball's velocity.
+    Vec3 to_half = team_goal_mid - ball_pos;
+    float dot_half = to_half.dot(ball_vel);
+    if (dot_half > 0.0f)
+    {
+        // Optional: you may apply a threshold based on estimated arrival time.
+        float remainDist = to_half.length_2d();
+        if (ball_vel.length_2d() > remainDist / 0.01f)
+            return true;
+
+        // Or simply return true when heading toward half.
+        return true;
+    }
+
+    return false;
+}
+*/
+bool SoccerWorld::isBallMovingTowardHalf(KartTeam team) const
+{
+    // 1) Get ball position and velocity
+    Vec3 ball_pos = getBallPosition();
+    Vec3 ball_vel = getBallVelocity();
+
+    // If the ball is barely moving, we can’t say it’s “moving toward” anything
+    //if (ball_vel.length_2d() < 15.0f)
+        //return false;
+
+    // 2) Get the appropriate goal’s first and last points
+    CheckGoal* check_goal = m_bgd->getCheckGoal(team);
+    if (!check_goal)
+    {
+        Log::warn("SoccerWorld", "isBallMovingTowardGoal: Missing CheckGoal pointer!");
+        return false;
+    }
+    Vec3 goal_first = check_goal->getPoint(CheckGoal::POINT_FIRST);
+    Vec3 goal_last  = check_goal->getPoint(CheckGoal::POINT_LAST);
+    Vec3 team_goal_mid   = (goal_first + goal_last) * 0.5f;
+
+     // 3) Determine the other team (assumes a two-team system).
+    KartTeam other_team;
+    if (team == KART_TEAM_RED)
+        other_team = KART_TEAM_BLUE;
+    else
+        other_team = KART_TEAM_RED;
+
+    CheckGoal* other_goal = m_bgd->getCheckGoal(other_team);
+    if (!other_goal)
+    {
+        Log::warn("SoccerWorld", "isBallMovingTowardHalf: Missing CheckGoal pointer for other team!");
+        return false;
+    }
+    Vec3 other_goal_first = other_goal->getPoint(CheckGoal::POINT_FIRST);
+    Vec3 other_goal_last  = other_goal->getPoint(CheckGoal::POINT_LAST);
+    Vec3 other_goal_mid   = (other_goal_first + other_goal_last) * 0.5f;
+
+    // 3) Form vectors from the ball to each post
+    Vec3 to_first = goal_first - ball_pos;
+    Vec3 to_last  = goal_last  - ball_pos;
+
+    // 4) Ensure ball's initial position is closer to the other gate than to its own.
+    float distInitialToOther = (ball_pos - other_goal_mid).length_2d();
+    float distInitialToTeam  = (ball_pos - team_goal_mid).length_2d();
+    if (distInitialToOther >= distInitialToTeam)
+        return false;
+
+        // 5) Finally, ensure the ball velocity is actually heading *forward* toward the goal,
+        //    and not behind or away. A simple check is dot(midpoint, velocity) > 0.
+        Vec3 midpoint = (to_first + to_last) * 0.5f;
+        float dot_mid = midpoint.dot(ball_vel);
+
+        if (dot_mid > 0.0f)
+        {
+            // Optionally, you can also set a distance threshold if needed:
+            float distance = (midpoint).length_2d();
+            if (distance/ball_vel.length_2d() < 4.0f)
+            return true;
+        }
+
 
     return false;
 }
