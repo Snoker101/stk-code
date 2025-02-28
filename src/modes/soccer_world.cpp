@@ -748,6 +748,7 @@ void SoccerWorld::update(int ticks)
                 m_kart_scores[i].scoring_pts   = 0;
                 m_kart_scores[i].attacking_pts = 0;
                 m_kart_scores[i].defending_pts = 0;
+                m_kart_scores[i].inddefending_pts = 0;
                 m_kart_scores[i].bad_play_pts  = 0;
                 m_kart_scores[i].total_pts     = 0;
 
