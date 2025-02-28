@@ -70,9 +70,9 @@
 #include <sstream>      // for std::stringstream
 #include <string>       // for std::string
 #include <vector>
-#include <iomanip>
 #include <cstdlib>
 #include <unordered_map>
+#include <iomanip>
 #include "sqlite3.h" //  You will have to install the package libsqlite3-dev. For ubuntu: "sudo apt install libsqlite3-dev"
                     // and build game with sqlite3 on: "cmake .. -DNO_SHADERC=on ENABLE_SQLITE3"
 
@@ -172,8 +172,6 @@ std::string generateRandomMessage(const std::vector<std::string> Messages) {
 std::string lastJoinedName;
 std::string lastLeftName;
 
-float minutes_dur = 10.0f;
-
 struct Player {
     std::string name;
     int rank;
@@ -181,6 +179,47 @@ struct Player {
 };
 
 std::pair<int, int> getPlayerInfo(std::string playerName) {
+    // First try: search in "soccer_ranking.txt"
+    {
+        std::ifstream file("soccer_ranking.txt");
+        std::string line;
+        while (std::getline(file, line)) {
+            std::istringstream iss(line);
+            int rank;
+            std::string name;
+            int score;
+            if (!(iss >> rank >> name >> score)) {
+                continue;
+            }
+            if (name == playerName) {
+                return {rank, score};
+            }
+        }
+    }
+
+    // Second try: search in "soccer_ranking_2.txt"
+    {
+        std::ifstream file("soccer_ranking_fixed.txt");
+        std::string line;
+        while (std::getline(file, line)) {
+            std::istringstream iss(line);
+            int rank;
+            std::string name;
+            int score;
+            if (!(iss >> rank >> name >> score)) {
+                continue;
+            }
+            if (name == playerName) {
+                return {rank, score};
+            }
+        }
+    }
+
+    // Return {-1, -1} if the player is not found in either file.
+    return {-1, -1};
+}
+
+std::pair<int, int> getPlayerInfoCurrentRanking(std::string playerName) {
     std::vector<Player> players;
     std::ifstream file("soccer_ranking.txt");
     std::string line;
@@ -241,12 +280,12 @@ public:
 
 /** This is the central game setup protocol running in the server. It is
  *  mostly a finite state machine. Note that all nodes in ellipses and light
- *  grey background are actual states; nodes in boxes and white background
+ *  grey background are actual states; nodes in boxes and white background 
  *  are functions triggered from a state or triggering potentially a state
  *  change.
  \dot
  digraph interaction {
- node [shape=box]; "Server Constructor"; "playerTrackVote"; "connectionRequested";
+ node [shape=box]; "Server Constructor"; "playerTrackVote"; "connectionRequested"; 
                    "signalRaceStartToClients"; "startedRaceOnClient"; "loadWorld";
  node [shape=ellipse,style=filled,color=lightgrey];
 
@@ -262,7 +301,7 @@ public:
  "playerTrackVote" -> "SELECTING" [label="Not all clients have selected"]
  "playerTrackVote" -> "LOAD_WORLD" [label="All clients have selected; signal load_world to clients"]
  "LOAD_WORLD" -> "loadWorld"
- "loadWorld" -> "WAIT_FOR_WORLD_LOADED"
+ "loadWorld" -> "WAIT_FOR_WORLD_LOADED" 
  "WAIT_FOR_WORLD_LOADED" -> "WAIT_FOR_WORLD_LOADED" [label="Client or server loaded world"]
  "WAIT_FOR_WORLD_LOADED" -> "signalRaceStartToClients" [label="All clients and server ready"]
  "signalRaceStartToClients" -> "WAIT_FOR_RACE_STARTED"
@@ -505,7 +544,7 @@ void ServerLobby::updateTracksForMode()
     lastJoinedName = "";
     lastLeftName = "";
     m_mix_voters.clear();
-  
+
     // Read tips from the file
     std::ifstream file("tips.txt");
     if (file.is_open())
@@ -602,6 +641,7 @@ void ServerLobby::updateTracksForMode()
             "  ScoringPts, "
             "  AttackingPts, "
             "  DefendingPts, "
+            "  IndDefendingPts, "
             "  BadPlayPts, "
             "  Total, "
             "  Rank, "
@@ -639,6 +679,19 @@ void ServerLobby::updateTracksForMode()
             float teamMembersCountPerMatch;
             float minutesPlayedCount;
             int   rank; // We'll assign rank after sorting
+
+            // For the "col" script logic (raw stats):
+            float rawScoringPts;
+            float rawAttackingPts;
+            float rawDefendingPts;
+            float rawBadPlayPts;
+
+            // Percentages computed by col script:
+            float allPercent;
+            float scorePercent;
+            float attackPercent;
+            float defendPercent;
+            float badPlayPercent;
         };
 
         std::vector<PlayerRow> allPlayers;
@@ -647,7 +700,7 @@ void ServerLobby::updateTracksForMode()
         // Write a header line into db_table_copy.txt
         //
         out_file_copy
-            << "PlayerName,ScoringPts,AttackingPts,DefendingPts,"
+            << "PlayerName,ScoringPts,AttackingPts,DefendingPts,IndDefendingPts,"
             << "BadPlayPts,Total,Rank,matches_played,matches_participated,"
             << "matches_won,team_members_count,minutes_played_count\n";
 
@@ -658,12 +711,13 @@ void ServerLobby::updateTracksForMode()
             float scoringPts         = (float)sqlite3_column_int(stmt_fetch, 1);
             float attackingPts       = (float)sqlite3_column_int(stmt_fetch, 2);
             float defendingPts       = (float)sqlite3_column_int(stmt_fetch, 3);
-            float badPlayPts         = (float)sqlite3_column_int(stmt_fetch, 4);
-            float matchesPlayed      = (float)sqlite3_column_double(stmt_fetch, 7);
-            int   matchesParticipated= sqlite3_column_int(stmt_fetch, 8);
-            int   matchesWon         = sqlite3_column_int(stmt_fetch, 9);
-            float teamMembersCount   = (float)sqlite3_column_int(stmt_fetch, 10);
-            float minutesPlayedCount = (float)sqlite3_column_double(stmt_fetch, 11);
+            float inddefendingPts       = (float)sqlite3_column_int(stmt_fetch, 4);
+            float badPlayPts         = (float)sqlite3_column_int(stmt_fetch, 5);
+            float matchesPlayed      = (float)sqlite3_column_double(stmt_fetch, 8);
+            int   matchesParticipated= sqlite3_column_int(stmt_fetch, 9);
+            int   matchesWon         = sqlite3_column_int(stmt_fetch, 10);
+            float teamMembersCount   = (float)sqlite3_column_int(stmt_fetch, 11);
+            float minutesPlayedCount = (float)sqlite3_column_double(stmt_fetch, 12);
 
             // -------------------------------------------------
             // Write the unfiltered row directly to db_table_copy.txt
@@ -677,6 +731,7 @@ void ServerLobby::updateTracksForMode()
                     << scoringPts       << ","
                     << attackingPts     << ","
                     << defendingPts     << ","
+                    << inddefendingPts     << ","
                     << badPlayPts       << ","
                     << /* 6 = total */     /* Whether or not you want to output it by reading? */
                     sqlite3_column_int(stmt_fetch, 5) << ","
@@ -734,6 +789,19 @@ void ServerLobby::updateTracksForMode()
                 row.teamMembersCountPerMatch= teamMembersCountPerMatch;
                 row.minutesPlayedCount        = minutesPlayedCount;
                 row.rank = 0; // placeholder (will assign after sorting)
+
+                 // Save raw stats for col script:
+                row.rawScoringPts   = scoringPts;
+                row.rawAttackingPts = attackingPts;
+                row.rawDefendingPts = defendingPts;
+                row.rawBadPlayPts   = badPlayPts;
+                // Initialize col script percentages
+                row.allPercent      = 0.0f;
+                row.scorePercent    = 0.0f;
+                row.attackPercent   = 0.0f;
+                row.defendPercent   = 0.0f;
+                row.badPlayPercent  = 0.0f;
+
                 allPlayers.push_back(row);
             }
         }
@@ -819,9 +887,371 @@ void ServerLobby::updateTracksForMode()
         Log::info("SoccerWorld",
                   "Data written to soccer_ranking_detailed.txt, soccer_ranking.txt, "
                   "and db_table_copy.txt successfully.");
+ // -----------------------------------------------------------------
+        // 2) COL SCRIPT LOGIC: same filter, compute means, factors, etc.
+        //    Then sort by All% and write to "colallstats.txt"
+        // -----------------------------------------------------------------
+        if (!allPlayers.empty())
+        {
+            // Compute sums
+            float sumScoring  = 0.0f;
+            float sumAttack   = 0.0f;
+            float sumDefend   = 0.0f;
+            float sumBadPlay  = 0.0f;
+            float sumMinutes  = 0.0f;
+
+            for (const auto& p : allPlayers)
+            {
+                sumScoring += p.rawScoringPts;
+                sumAttack  += p.rawAttackingPts;
+                sumDefend  += p.rawDefendingPts;
+                sumBadPlay += p.rawBadPlayPts;
+                sumMinutes += p.minutesPlayedCount;
+            }
+            const int N = static_cast<int>(allPlayers.size());
+            if (N == 0)
+            {
+                Log::info("SoccerWorld", "No players meet criteria for colallstats.txt");
+            }
+            else
+            {
+                // Averages
+                float MedianScore   = sumScoring  / N;
+                float MedianAttack  = sumAttack   / N;
+                float MedianDefend  = sumDefend   / N;
+                float MedianBadPlay = sumBadPlay  / N;
+                float MedianTime    = sumMinutes  / N;
+
+                // Factors (watch out for zero)
+                float FactorScore   = (MedianScore  == 0.0f) ? 0.0f : (MedianAttack / MedianScore);
+                float FactorAttack  =  MedianAttack / 100.0f;
+                float FactorDefend  = (MedianDefend == 0.0f) ? 0.0f : (MedianAttack / MedianDefend);
+                float FactorBadPlay = (MedianBadPlay== 0.0f) ? 0.0f : (MedianAttack / MedianBadPlay);
+                float Equalizer100  = (MedianAttack == 0.0f) ? 0.0f : ((1.0f / MedianAttack) * MedianTime);
+
+                // Compute each player's percentages
+                for (auto &p : allPlayers)
+                {
+                    float scoring = p.rawScoringPts;
+                    float attack  = p.rawAttackingPts;
+                    float defend  = p.rawDefendingPts;
+                    float badplay = p.rawBadPlayPts;
+                    float minutes = p.minutesPlayedCount;
+
+                    if (minutes < 1e-6f)
+                    {
+                        // Avoid division by zero
+                        p.scorePercent   = 0.0f;
+                        p.attackPercent  = 0.0f;
+                        p.defendPercent  = 0.0f;
+                        p.badPlayPercent = 0.0f;
+                        p.allPercent     = 0.0f;
+                    }
+                    else
+                    {
+                        float denom       = (minutes / 100.0f);
+                        p.scorePercent    = (FactorScore   * Equalizer100 * scoring)  / denom;
+                        p.attackPercent   = (1.0f          * Equalizer100 * attack )  / denom;
+                        p.defendPercent   = (FactorDefend  * Equalizer100 * defend )  / denom;
+                        p.badPlayPercent  = (FactorBadPlay * Equalizer100 * badplay)  / denom;
+
+                        p.allPercent
+                            = (((5.0f / 3.0f)
+                                * (p.scorePercent + p.attackPercent + p.defendPercent))
+                               - p.badPlayPercent
+                              ) / 4.0f;
+                    }
+                }
+
+                // Sort by All% descending
+std::sort(allPlayers.begin(), allPlayers.end(),
+          [](const PlayerRow& a, const PlayerRow& b){
+              return a.allPercent > b.allPercent;
+          });
+
+// Write results to "colallstats.txt"
+std::ofstream out_file_col("colallstats.txt");
+if (!out_file_col.is_open())
+{
+    Log::warn("SoccerWorld", "Cannot open colallstats.txt for writing.");
+}
+else
+{
+    // Set a reasonable precision for floats:
+    out_file_col << std::fixed << std::setprecision(2);
+
+    // Print header row with aligned columns including the new Rank column.
+    // We use a width of 5 characters for Rank.
+    out_file_col
+        << std::left  << std::setw(5)  << "Rank"
+        << std::left  << std::setw(15) << "PlayerName"
+        << std::right << std::setw(10) << "All%"
+        << std::right << std::setw(10) << "Score%"
+        << std::right << std::setw(10) << "Attack%"
+        << std::right << std::setw(10) << "Defend%"
+        << std::right << std::setw(10) << "BadPlay%"
+        << "\n";
+
+    // (Optional) print a separator line:
+    // Total width = 5 (Rank) + 15 (PlayerName) + 5*10 = 70 characters.
+    //out_file_col << std::string(70, '-') << "\n";
+
+    // Use an index-based loop to calculate and output ranks.
+    int currentRank = 1;
+    // Using index so that we can compare with the previous player's All%
+    for (size_t i = 0; i < allPlayers.size(); i++)
+    {
+        // For the first player, rank is 1.
+        // For later players, if the current player's All% is different from the previous,
+        // update the rank to i+1 (since the vector is 0-indexed).
+        if (i > 0 && allPlayers[i].allPercent != allPlayers[i-1].allPercent)
+        {
+            currentRank = i + 1;
+        }
+        // For badPlayPercent, create a formatted string with a "-" sign prefixed.
+            std::ostringstream ossBadPlay;
+            ossBadPlay << "-" << allPlayers[i].badPlayPercent;
+            std::string badPlayStr = ossBadPlay.str();
+        out_file_col
+            << std::left  << std::setw(5)  << currentRank
+            << std::left  << std::setw(15) << allPlayers[i].playerName
+            << std::right << std::setw(10) << allPlayers[i].allPercent
+            << std::right << std::setw(10) << allPlayers[i].scorePercent
+            << std::right << std::setw(10) << allPlayers[i].attackPercent
+            << std::right << std::setw(10) << allPlayers[i].defendPercent
+            << std::right << std::setw(10) << badPlayStr
+            << "\n";
     }
+    out_file_col.close();
 }
 
+            }
+        }
+
+    // -----------------------------------------------------------------
+    // Part 3: NEW LOGIC -- Read from soccer_ranking_detailed_sw.txt,
+    //         force minutes=1, compute COL results => collastmatchstats.txt
+    // -----------------------------------------------------------------
+    {
+        std::ifstream fLastMatch("soccer_ranking_detailed_sw.txt");
+        if (!fLastMatch.is_open())
+        {
+            Log::warn("SoccerWorld",
+                      "Cannot open soccer_ranking_detailed_sw.txt for reading last-match data.");
+            return;  // or continue if you want
+        }
+
+        // We'll store last-match data with forced minutes=1
+        struct LastMatchRow
+        {
+            std::string playerName;
+            float scoringPts;
+            float attackingPts;
+            float defendingPts;
+            float badPlayPts;
+            float minutes; // forced = 1
+            // Computed for the COL logic
+            float allPercent;
+            float scorePercent;
+            float attackPercent;
+            float defendPercent;
+            float badPlayPercent;
+        };
+
+        std::vector<LastMatchRow> lastMatchPlayers;
+
+        // Skip header line
+        std::string header;
+        if (!std::getline(fLastMatch, header))
+        {
+            Log::warn("SoccerWorld", "soccer_ranking_detailed_sw.txt is empty.");
+            fLastMatch.close();
+            return;
+        }
+
+        // Parse lines
+        while (true)
+        {
+            std::string line;
+            if (!std::getline(fLastMatch, line)) break;
+            if (line.empty()) continue;
+
+            // Example line:
+            // "1 mahmoudtark25 3 9 1 -1 12"
+            std::stringstream ss(line);
+
+            int rank;
+            std::string name;
+            float scoring, attacking, defending, badPlay, total;
+            ss >> rank >> name >> scoring >> attacking >> defending >> badPlay >> total;
+            if (ss.fail()) continue; // skip if parse error
+
+            LastMatchRow row;
+            row.playerName     = name;
+            row.scoringPts     = scoring;
+            row.attackingPts   = attacking;
+            row.defendingPts   = defending;
+            row.badPlayPts     = badPlay;
+            row.minutes        = 1.0f;  // forced
+            row.allPercent     = 0.0f;
+            row.scorePercent   = 0.0f;
+            row.attackPercent  = 0.0f;
+            row.defendPercent  = 0.0f;
+            row.badPlayPercent = 0.0f;
+
+            lastMatchPlayers.push_back(row);
+        }
+        fLastMatch.close();
+
+        if (lastMatchPlayers.empty())
+        {
+            Log::info("SoccerWorld", "No last-match players found in soccer_ranking_detailed_sw.txt.");
+            return;
+        }
+
+        // -- COL algorithm on lastMatchPlayers (everyone has minutes=1) --
+        float sumScoring = 0.0f;
+        float sumAttack  = 0.0f;
+        float sumDefend  = 0.0f;
+        float sumBadPlay = 0.0f;
+        float sumMinutes = 0.0f;
+
+        for (auto &p : lastMatchPlayers)
+        {
+            sumScoring += p.scoringPts;
+            sumAttack  += p.attackingPts;
+            sumDefend  += p.defendingPts;
+            sumBadPlay += p.badPlayPts;
+            sumMinutes += p.minutes;  // always 1
+        }
+
+        int N = static_cast<int>(lastMatchPlayers.size());
+        if (N == 0)
+        {
+            Log::info("SoccerWorld", "No valid players in last match file.");
+            return;
+        }
+
+        float MedianScore   = sumScoring  / N;
+        float MedianAttack  = sumAttack   / N;
+        float MedianDefend  = sumDefend   / N;
+        float MedianBadPlay = sumBadPlay  / N;
+        float MedianTime    = sumMinutes  / N; // ~1 if we forced 1
+
+        float FactorScore   = (MedianScore  == 0.0f) ? 0.0f : (MedianAttack / MedianScore);
+        float FactorAttack  =  MedianAttack / 100.0f;
+        float FactorDefend  = (MedianDefend == 0.0f) ? 0.0f : (MedianAttack / MedianDefend);
+        float FactorBadPlay = (MedianBadPlay== 0.0f) ? 0.0f : (MedianAttack / MedianBadPlay);
+        float Equalizer100  = (MedianAttack == 0.0f) ? 0.0f : ((1.0f / MedianAttack) * MedianTime);
+
+        for (auto &p : lastMatchPlayers)
+        {
+            float scoring = p.scoringPts;
+            float attack  = p.attackingPts;
+            float defend  = p.defendingPts;
+            float badPlay = p.badPlayPts;
+            float minutes = p.minutes; // 1
+
+            // Denominator = minutes / 100 => 0.01
+            float denom = (minutes / 100.0f);
+            if (denom < 1e-9f)
+            {
+                // Should not happen if minutes=1, but just in case:
+                p.scorePercent   = 0.0f;
+                p.attackPercent  = 0.0f;
+                p.defendPercent  = 0.0f;
+                p.badPlayPercent = 0.0f;
+                p.allPercent     = 0.0f;
+            }
+            else
+            {
+                p.scorePercent   = (FactorScore   * Equalizer100 * scoring ) / denom;
+                p.attackPercent  = (1.0f          * Equalizer100 * attack  ) / denom;
+                p.defendPercent  = (FactorDefend  * Equalizer100 * defend  ) / denom;
+                p.badPlayPercent = (FactorBadPlay * Equalizer100 * badPlay ) / denom;
+
+                p.allPercent
+                    = (((5.0f / 3.0f)
+                        * (p.scorePercent + p.attackPercent + p.defendPercent))
+                       - p.badPlayPercent
+                      ) / 4.0f;
+            }
+        }
+
+// Sort by All% descending
+std::sort(lastMatchPlayers.begin(), lastMatchPlayers.end(),
+          [](const LastMatchRow &a, const LastMatchRow &b){
+              return a.allPercent > b.allPercent;
+          });
+
+// Write to collastmatchstats.txt
+std::ofstream outLast("collastmatchstats.txt");
+if (!outLast.is_open())
+{
+    Log::warn("SoccerWorld", "Cannot open collastmatchstats.txt for writing.");
+    return;
+}
+
+outLast << std::fixed << std::setprecision(2);
+
+// Print header row with Rank column added.
+outLast
+    << std::left  << std::setw(5)  << "Rank"
+    << std::left  << std::setw(15) << "PlayerName"
+    << std::right << std::setw(10) << "All%"
+    << std::right << std::setw(10) << "Score%"
+    << std::right << std::setw(10) << "Attack%"
+    << std::right << std::setw(10) << "Defend%"
+    << std::right << std::setw(10) << "BadPlay%"
+    << "\n";
+
+// Total width = 5 (Rank) + 15 (PlayerName) + 5*10 = 70 characters.
+//outLast << std::string(70, '-') << "\n";
+
+// Calculate rank and output each row.
+// Tied players (equal allPercent) share the same rank.
+int currentRank = 1;
+for (size_t i = 0; i < lastMatchPlayers.size(); i++)
+{
+    // For players beyond the first one, update rank if current player's All% is lower than previous.
+    if (i > 0 && lastMatchPlayers[i].allPercent != lastMatchPlayers[i - 1].allPercent)
+    {
+        currentRank = i + 1;
+    }
+
+    // Format badPlayPercent with a preceding "-" sign.
+    std::ostringstream ossBadPlay;
+    ossBadPlay << "-" << lastMatchPlayers[i].badPlayPercent;
+    std::string badPlayStr = ossBadPlay.str();
+
+    outLast
+        << std::left  << std::setw(5)  << currentRank
+        << std::left  << std::setw(15) << lastMatchPlayers[i].playerName
+        << std::right << std::setw(10) << lastMatchPlayers[i].allPercent
+        << std::right << std::setw(10) << lastMatchPlayers[i].scorePercent
+        << std::right << std::setw(10) << lastMatchPlayers[i].attackPercent
+        << std::right << std::setw(10) << lastMatchPlayers[i].defendPercent
+        << std::right << std::setw(10) << badPlayStr
+        << "\n";
+}
+
+outLast.close();
+
+        Log::info("SoccerWorld",
+                  "Last-match COL stats saved to collastmatchstats.txt successfully.");
+    }
+
+    // Done
+    Log::info("SoccerWorld",
+              "Finished updateTracksForMode with last-match COL stats.");
+
+
+        Log::info("SoccerWorld",
+                  "Data written to soccer_ranking_detailed.txt, soccer_ranking.txt, "
+                  "db_table_copy.txt, and colallstats.txt successfully.");
+    }
+
+}
 
 
 } // updateTracksForMode
@@ -870,7 +1300,7 @@ void ServerLobby::setup()
 
     m_server_has_loaded_world.store(false);
 
-    // Initialise the data structures to detect if all clients and
+    // Initialise the data structures to detect if all clients and 
     // the server are ready:
     resetPeersReady();
     m_timeout.store(std::numeric_limits<int64_t>::max());
@@ -945,7 +1375,7 @@ void ServerLobby::handleChat(Event* event)
     std::string message_utf8 = StringUtils::wideToUtf8(message);
     std::string prefix = StringUtils::wideToUtf8(
         event->getPeer()->getPlayerProfiles()[0]->getName()) + ": ";
-    
+
     if (!StringUtils::startsWith(message_utf8, prefix))
     {
         NetworkString* chat = getNetworkString();
@@ -1947,8 +2377,8 @@ void ServerLobby::finishedLoadingLiveJoinClient(Event* event)
     delete ns;
     updatePlayerList();
     peer->updateLastActivity();
-  
-   if ((!spectator) && (m_state.load() == RACING) && (powerup_multiplier_value() == 3) && (!losing_team_weaker()))
+
+    if ((!spectator) && (m_state.load() == RACING) && (powerup_multiplier_value() == 3) && (!losing_team_weaker()))
         {
             set_powerup_multiplier(1);
             send_message("Powerupper is OFF (automatically)");
@@ -1958,7 +2388,7 @@ void ServerLobby::finishedLoadingLiveJoinClient(Event* event)
             set_powerup_multiplier(3);
             send_message("Powerupper is ON (automatically)");
         }
-  
+
 }   // finishedLoadingLiveJoinClient
 
 //-----------------------------------------------------------------------------
@@ -2169,7 +2599,7 @@ void ServerLobby::update(int ticks)
 //-----------------------------------------------------------------------------
 /** Register this server (i.e. its public address) with the STK server
  *  so that clients can find it. It blocks till a response from the
- *  stk server is received (this function is executed from the
+ *  stk server is received (this function is executed from the 
  *  ProtocolManager thread). The information about this client is added
  *  to the table 'server'.
  */
@@ -2811,7 +3241,7 @@ void ServerLobby::checkRaceFinished(bool endnow)
                 player->setOverallTime(overall_time);
             }
             m_result_ns->addUInt32(last_score).addUInt32(cur_score)
-                .addFloat(overall_time);
+                .addFloat(overall_time);            
         }
     }
     else if (RaceManager::get()->modeHasLaps())
@@ -2842,17 +3272,17 @@ void ServerLobby::checkRaceFinished(bool endnow)
  */
 void ServerLobby::computeNewRankings()
 {
-
+    
     // No ranking for battle mode
     if (!RaceManager::get()->modeHasLaps())
         return;
 
-
+    
     World* w = World::getWorld();
     assert(w);
 
     unsigned player_count = RaceManager::get()->getNumPlayers();
-
+    
 
     // If all players quitted the race, we assume something went wrong
     // and skip entirely rating and statistics updates.
@@ -2913,8 +3343,8 @@ void ServerLobby::clientDisconnected(Event* event)
         std::string name = StringUtils::wideToUtf8(p->getName());
         msg->encodeString(name);
         Log::info("ServerLobby", "%s disconnected", name.c_str());
-      
-     if ((m_state.load() == RACING) && (powerup_multiplier_value() == 3) && (!losing_team_weaker()))
+
+        if ((m_state.load() == RACING) && (powerup_multiplier_value() == 3) && (!losing_team_weaker()))
         {
             set_powerup_multiplier(1);
             send_message("Powerupper is OFF (automatically)");
@@ -2924,7 +3354,8 @@ void ServerLobby::clientDisconnected(Event* event)
             set_powerup_multiplier(3);
             send_message("Powerupper is ON (automatically)");
         }
-      
+
+
     }
 
     // Don't show waiting peer disconnect message to in game player
@@ -3506,7 +3937,7 @@ int prosLimit = ServerConfig::m_pros_limit;
             core::stringw name = _("Bot");
 #endif
             name += core::stringw(" ") + StringUtils::toWString(i + 1);
-
+            
             m_ai_profiles.push_back(std::make_shared<NetworkPlayerProfile>
                 (peer, name, peer->getHostId(), 0.0f, 0, HANDICAP_NONE,
                 player_count + i, KART_TEAM_NONE, ""));
@@ -3640,11 +4071,11 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
         std::wcsrtombs(&profile_name_for_rank[0], &profile_name_wide_cstr, buffer_size, nullptr);
 
         // Add medal ranking
-        if(getPlayerInfo(profile_name_for_rank).first == 1)
+        if(getPlayerInfoCurrentRanking(profile_name_for_rank).first == 1)
             profile_name = StringUtils::utf32ToWide({ 0x1F947 }) + profile_name;
-        else if (getPlayerInfo(profile_name_for_rank).first == 2)
+        else if (getPlayerInfoCurrentRanking(profile_name_for_rank).first == 2)
             profile_name = StringUtils::utf32ToWide({ 0x1F948 }) + profile_name;
-        else if (getPlayerInfo(profile_name_for_rank).first == 3)
+        else if (getPlayerInfoCurrentRanking(profile_name_for_rank).first == 3)
             profile_name = StringUtils::utf32ToWide({ 0x1F949 }) + profile_name;
 
          // Add a Cedar tree emoji if the player's name is "Cedar"
@@ -3660,7 +4091,7 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
             profile_name = StringUtils::utf32ToWide({ 0x1F4F1 }) + profile_name;
 
         // Add an hourglass emoji for players waiting because of the player limit
-        if (spectators_by_limit.find(profile->getPeer()) != spectators_by_limit.end())
+        if (spectators_by_limit.find(profile->getPeer()) != spectators_by_limit.end()) 
             profile_name = StringUtils::utf32ToWide({ 0x231B }) + profile_name;
 
         pl->addUInt32(profile->getHostId()).addUInt32(profile->getOnlineId())
@@ -3912,7 +4343,7 @@ bool ServerLobby::handleAllVotes(PeerVote* winner_vote,
         return false;
     }
 
-    // Count number of players
+    // Count number of players 
     float cur_players = 0.0f;
     auto peers = STKHost::get()->getPeers();
     for (auto peer : peers)
@@ -4983,7 +5414,8 @@ void ServerLobby::clientInGameWantsToBackLobby(Event* event)
     m_game_setup->addServerInfo(server_info);
     peer->sendPacket(server_info, /*reliable*/true);
     delete server_info;
-  if ((m_state.load() == RACING) && (powerup_multiplier_value() == 3) && (!losing_team_weaker()))
+
+    if ((m_state.load() == RACING) && (powerup_multiplier_value() == 3) && (!losing_team_weaker()))
         {
             set_powerup_multiplier(1);
             send_message("Powerupper is OFF (automatically)");
@@ -4993,6 +5425,7 @@ void ServerLobby::clientInGameWantsToBackLobby(Event* event)
             set_powerup_multiplier(3);
             send_message("Powerupper is ON (automatically)");
         }
+
 }   // clientInGameWantsToBackLobby
 
 //-----------------------------------------------------------------------------
@@ -5233,7 +5666,7 @@ void ServerLobby::handleServerCommand(Event* event,
 
         // Check if the password matches
         if ((!argv[2].empty()) && (password == argv[2])) {
-            if (argv[1] == "on") {
+            if ((argv[1] == "on") && (powerup_multiplier_value() == 1)) {
                 set_powerup_multiplier(3);
                 NetworkString* chat = getNetworkString();
                 chat->addUInt8(LE_CHAT);
@@ -5427,6 +5860,7 @@ else if (argv[0] == "tip")
     peer->sendPacket(chat, true /* reliable */);
     delete chat;
 }
+
 else if (argv[0] == "teams")
 {
     int red_team_score = 0;
@@ -5673,7 +6107,9 @@ else if ((argv[0] == "mix") || (argv[0] == "autoteams") || (argv[0] == "randomte
         m_mix_voters.clear();
     }
 }
-  
+
+
+
 else if (argv[0] == "rank")
     {
         if (argv.size() < 2)
@@ -5953,7 +6389,107 @@ else if ((argv[0] == "changeteam") || (argv[0] == "ct"))
     }
 }
 
+else if ((argv[0] == "statall") || (argv[0] == "stata"))
+{
+    // By default, display 9 lines. If the user types '/statsall 10',
+    // we display 11 lines (the user-specified number + 1).
+    int linesToRead = 9; // default
+    if (argv.size() > 1) // user provided a second argument
+    {
+        int requested = std::stoi(argv[1]);
+        linesToRead = requested + 1;
+    }
 
+    // We will read from "colallstats.txt" line by line
+    std::ifstream file("colallstats.txt");
+    if (!file.is_open())
+    {
+        // If the file can’t be opened or doesn’t exist, send an error message
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+
+        std::string err = "Error: Cannot open 'colallstats.txt' for reading.";
+        chat->encodeString16(StringUtils::utf8ToWide(err));
+        peer->sendPacket(chat, true /* reliable */);
+
+        delete chat;
+        return;
+    }
+
+    // Collect lines and build a single message string
+    std::string msg;
+    std::string line;
+    int count = 0;
+    while (std::getline(file, line) && count < linesToRead)
+    {
+        msg += line + "\n";
+        count++;
+    }
+    file.close();
+
+    // Send the collected lines to chat
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+
+    // Put the message in chat
+    chat->encodeString16(StringUtils::utf8ToWide(msg));
+    peer->sendPacket(chat, true /* reliable */);
+
+    delete chat;
+}
+
+else if (argv[0] == "statg")
+{
+    // By default, display 10 lines. If the user types '/statsall 10',
+    // we display 11 lines (the user-specified number + 1).
+    int linesToRead = 10; // default
+    if (argv.size() > 1) // user provided a second argument
+    {
+        int requested = std::stoi(argv[1]);
+        linesToRead = requested + 1;
+    }
+
+    // We will read from "collastmatchstats.txt" line by line
+    std::ifstream file("collastmatchstats.txt");
+    if (!file.is_open())
+    {
+        // If the file can’t be opened or doesn’t exist, send an error message
+        NetworkString* chat = getNetworkString();
+        chat->addUInt8(LE_CHAT);
+        chat->setSynchronous(true);
+
+        std::string err = "Error: Cannot open 'collastmatchstats.txt' for reading.";
+        chat->encodeString16(StringUtils::utf8ToWide(err));
+        peer->sendPacket(chat, true /* reliable */);
+
+        delete chat;
+        return;
+    }
+
+    // Collect lines and build a single message string
+    std::string msg;
+    std::string line;
+    int count = 0;
+    while (std::getline(file, line) && count < linesToRead)
+    {
+        msg += line + "\n";
+        count++;
+    }
+    file.close();
+
+    // Send the collected lines to chat
+    NetworkString* chat = getNetworkString();
+    chat->addUInt8(LE_CHAT);
+    chat->setSynchronous(true);
+
+    // Put the message in chat
+    chat->encodeString16(StringUtils::utf8ToWide(msg));
+    peer->sendPacket(chat, true /* reliable */);
+
+    delete chat;
+}
        else if (argv[0] == "help")
     {
     NetworkString* chat = getNetworkString();
@@ -6509,6 +7045,7 @@ for (auto& p : peers)
 delete chat;
 
 }
+
 void ServerLobby::send_private_message(const std::string &msg, std::shared_ptr<STKPeer> target_peer)
 {
     NetworkString* chat = getNetworkString();
