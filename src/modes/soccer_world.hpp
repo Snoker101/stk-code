@@ -42,6 +42,7 @@ struct KartScore
     int scoring_pts;
     int attacking_pts;
     int defending_pts;
+    int inddefending_pts;
     int bad_play_pts;
     int total_pts;
 
@@ -50,6 +51,7 @@ struct KartScore
         scoring_pts   = 0;
         attacking_pts = 0;
         defending_pts = 0;
+        inddefending_pts = 0;
         bad_play_pts  = 0;
         total_pts     = 0;
     }
@@ -86,6 +88,8 @@ private:
     int  m_previous_ball_hitter;
     bool m_previous_approaching_hitter;
     bool m_previous_approaching_opponent;
+    bool m_previous_approaching_hitter_half;
+    bool m_previous_approaching_opponent_half;
 
     int m_ball_possession_red   = 0;
     int m_ball_possession_blue  = 0;
@@ -240,6 +244,8 @@ public:
     bool ballApproachingGoal(KartTeam team) const;
     // ------------------------------------------------------------------------
     bool isBallMovingTowardGoal(KartTeam team) const;
+    // ------------------------------------------------------------------------
+    bool isBallMovingTowardHalf(KartTeam team) const;
     // ------------------------------------------------------------------------
     bool isBallBetweenRedAndBlueGates() const;
     // ------------------------------------------------------------------------
