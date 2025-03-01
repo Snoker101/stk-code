@@ -756,7 +756,7 @@ void ServerLobby::updateTracksForMode()
                     std::round(attackingPts / matchesPlayed * 100.0f) / 100.0f;
                 float defendingPtsPerMatch   =
                     (matchesPlayed == 0.0f) ? 0.0f :
-                    std::round(defendingPts / matchesPlayed * 100.0f) / 100.0f;
+                    std::round((defendingPts + inddefendingPts) / matchesPlayed * 100.0f) / 100.0f;
                 float badPlayPtsPerMatch     =
                     (matchesPlayed == 0.0f) ? 0.0f :
                     std::round(badPlayPts / matchesPlayed * 100.0f) / 100.0f;
