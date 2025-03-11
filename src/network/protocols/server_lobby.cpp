@@ -5962,7 +5962,7 @@ else if ((argv[0] == "mix") || (argv[0] == "autoteams") || (argv[0] == "randomte
         return;
     }
 
-    // 2) Get this player's name
+    // 2) Get player's name
     auto profiles = peer->getPlayerProfiles();
     if (profiles.empty())
     {
@@ -5971,7 +5971,7 @@ else if ((argv[0] == "mix") || (argv[0] == "autoteams") || (argv[0] == "randomte
     }
     std::string player_name = StringUtils::wideToUtf8(profiles[0]->getName());
 
-    // 3) Check if this player already voted
+    // 3) Check if already voted
     auto it = m_mix_voters.find(player_name);
     if (it != m_mix_voters.end() && it->second)
     {
@@ -5982,12 +5982,11 @@ else if ((argv[0] == "mix") || (argv[0] == "autoteams") || (argv[0] == "randomte
     // 4) Record the vote
     m_mix_voters[player_name] = true;
 
-    // 5) Count how many active (non-spectator) players we have
+    // 5) Count how many active (non-spectator) players
     auto all_peers = STKHost::get()->getPeers();
     int total_active_players = 0;
     for (auto& p : all_peers)
     {
-        // Skip spectators
         if (!p->alwaysSpectate() && !p->isSpectator())
             total_active_players++;
     }
@@ -5999,7 +5998,7 @@ else if ((argv[0] == "mix") || (argv[0] == "autoteams") || (argv[0] == "randomte
         if (kv.second) current_votes++;
     }
 
-    // 7) Broadcast the updated vote count to all
+    // 7) Broadcast updated vote count
     {
         std::stringstream ss;
         ss <<"\U0001f5f3\uFE0F "<< player_name << " voted /mix. There are "
@@ -6008,117 +6007,129 @@ else if ((argv[0] == "mix") || (argv[0] == "autoteams") || (argv[0] == "randomte
     }
 
     // 8) Check if votes exceed 50% of the active players
-    // For example, if total_active_players=6, we need 4 votes (4*2=8 > 6)
     if (current_votes * 2 >= total_active_players)
-{
-    // Enough votes -> Assign teams
-
-    // A) Gather active players (skip spectators) + their rank & points
-    struct RankedPlayer
     {
-        std::shared_ptr<STKPeer> peer;
-        int rank;
-        int points;
-    };
-    std::vector<RankedPlayer> ranked_players;
-    ranked_players.reserve(total_active_players);
+        // Enough votes -> Assign teams
 
-    for (auto& p : all_peers)
-    {
-        if (p->alwaysSpectate() || p->isSpectator())
-            continue;
-
-        auto p_profiles = p->getPlayerProfiles();
-        if (p_profiles.empty())
-            continue;
-
-        std::string p_name = StringUtils::wideToUtf8(p_profiles[0]->getName());
-        auto info          = getPlayerInfo(p_name); // returns {rank, score}
-        int rank_val       = (info.first  < 0) ? 0 : info.first;
-        int points_val     = (info.second < 0) ? 20 : info.second;
-
-        ranked_players.push_back({ p, rank_val, points_val });
-    }
-
-    // (Optional) sort by descending rank
-    std::sort(ranked_players.begin(), ranked_players.end(),
-              [](const RankedPlayer& a, const RankedPlayer& b)
-              {
-                  return a.rank > b.rank;
-              });
-
-    // Compute the total sum of points
-    int total_sum = 0;
-    for (auto &rp : ranked_players)
-    {
-        total_sum += rp.points;
-    }
-
-    // Prepare a vector of just the players' scores
-    std::vector<int> scores;
-    scores.reserve(ranked_players.size());
-    for (auto &rp : ranked_players)
-    {
-        scores.push_back(rp.points);
-    }
-
-    // We will backtrack to find the subset that yields the closest sum to total_sum/2.
-    // This uses simple recursion to generate combinations of size n/2 (and n/2+1 if odd).
-    typedef std::vector<bool> BoolVec;
-
-    // backtrack parameters:
-    //  current_index: index of next player to consider
-    //  selected_count: number chosen so far
-    //  required_count: how many we want in the subset
-    //  best_diff: track the best difference found so far
-    //  scores: players' points
-    //  total_sum: total sum of scores
-    //  current_mask: which players are currently chosen
-    //  best_mask: which players led to best_diff
-    //  current_sum: sum of chosen subset so far
-
-    std::function<void(int,int,int,int&,const std::vector<int>&,int,BoolVec&,BoolVec&,int&)> backtrack;
-    backtrack = [&](int current_index,
-                    int selected_count,
-                    int required_count,
-                    int &best_diff,
-                    const std::vector<int> &scores,
-                    int total_sum,
-                    BoolVec &current_mask,
-                    BoolVec &best_mask,
-                    int &current_sum)
-    {
-        // If we've considered all players
-        if (current_index == (int)scores.size())
+        // A) Gather active players (skip spectators) + rank & points
+        struct RankedPlayer
         {
-            // Check if we formed a valid subset
-            if (selected_count == required_count)
-            {
-                int other_sum = total_sum - current_sum;
-                int diff = std::abs(current_sum - other_sum);
-                if (diff < best_diff)
-                {
-                    best_diff = diff;
-                    best_mask = current_mask;
-                }
-            }
-            return;
+            std::shared_ptr<STKPeer> peer;
+            int rank;
+            int points;
+        };
+        std::vector<RankedPlayer> ranked_players;
+        ranked_players.reserve(total_active_players);
+
+        for (auto& p : all_peers)
+        {
+            if (p->alwaysSpectate() || p->isSpectator())
+                continue;
+
+            auto p_profiles = p->getPlayerProfiles();
+            if (p_profiles.empty())
+                continue;
+
+            std::string p_name = StringUtils::wideToUtf8(p_profiles[0]->getName());
+            auto info          = getPlayerInfo(p_name); // returns {rank, score}
+            int rank_val       = (info.first  < 0) ? 0 : info.first;
+            int points_val     = (info.second < 0) ? 20 : info.second;
+
+            ranked_players.push_back({ p, rank_val, points_val });
         }
 
-        // Prune if we can't possibly fill or if we've already taken too many
-        int remaining = (int)scores.size() - current_index;
-        int to_fill   = required_count - selected_count;
-        if (to_fill > remaining) return;             // not enough left
-        if (selected_count > required_count) return; // took too many
+        // (Optional) sort by descending rank
+        std::sort(ranked_players.begin(), ranked_players.end(),
+                  [](const RankedPlayer& a, const RankedPlayer& b)
+                  {
+                      return a.rank > b.rank;
+                  });
 
-        // Option 1: select this player
-        if (selected_count < required_count)
+        // Compute total sum of points
+        int total_sum = 0;
+        for (auto &rp : ranked_players)
+            total_sum += rp.points;
+
+        // Prepare parallel vector of scores
+        std::vector<int> scores;
+        scores.resize(ranked_players.size());
+        for (size_t i = 0; i < ranked_players.size(); ++i)
+            scores[i] = ranked_players[i].points;
+
+        // We will backtrack over all subset sizes 1..(n-1) to find
+        // the subset whose sum is as close as possible to total_sum/2.
+        typedef std::vector<bool> BoolVec;
+
+        // backtrack parameters:
+        //  current_index: index of next player to consider
+        //  selected_count: how many chosen so far
+        //  required_count: how many we *want* in this subset
+        //  best_diff: track best difference found
+        //  scores: players' points
+        //  total_sum: total of all points
+        //  current_mask: who is in this subset
+        //  best_mask: track subset achieving best_diff
+        //  current_sum: sum of the chosen subset so far
+        std::function<void(int,int,int,int&,const std::vector<int>&,int,BoolVec&,BoolVec&,int&)> backtrack;
+        backtrack = [&](int current_index,
+                        int selected_count,
+                        int required_count,
+                        int &best_diff,
+                        const std::vector<int> &scores,
+                        int total_sum,
+                        BoolVec &current_mask,
+                        BoolVec &best_mask,
+                        int &current_sum)
         {
-            current_mask[current_index] = true;
-            current_sum += scores[current_index];
+            // If we've considered all players
+            if (current_index == (int)scores.size())
+            {
+                // Check if we formed exactly required_count
+                if (selected_count == required_count)
+                {
+                    int other_sum = total_sum - current_sum;
+                    int diff = std::abs(current_sum - other_sum);
+                    if (diff < best_diff)
+                    {
+                        best_diff = diff;
+                        best_mask = current_mask;
+                    }
+                }
+                return;
+            }
 
+            // Number of players left to process
+            int remaining = (int)scores.size() - current_index;
+            // How many we still need to pick
+            int to_fill   = required_count - selected_count;
+            // Prune: if not enough left or we've already selected too many
+            if (to_fill > remaining) return;
+            if (selected_count > required_count) return;
+
+            // Option 1: choose this player
+            if (selected_count < required_count)
+            {
+                current_mask[current_index] = true;
+                current_sum += scores[current_index];
+
+                backtrack(current_index + 1,
+                          selected_count + 1,
+                          required_count,
+                          best_diff,
+                          scores,
+                          total_sum,
+                          current_mask,
+                          best_mask,
+                          current_sum);
+
+                // revert
+                current_sum -= scores[current_index];
+                current_mask[current_index] = false;
+            }
+
+            // Option 2: skip this player
             backtrack(current_index + 1,
-                      selected_count + 1,
+                      selected_count,
                       required_count,
                       best_diff,
                       scores,
@@ -6126,130 +6137,95 @@ else if ((argv[0] == "mix") || (argv[0] == "autoteams") || (argv[0] == "randomte
                       current_mask,
                       best_mask,
                       current_sum);
+        };
 
-            // revert
-            current_sum -= scores[current_index];
-            current_mask[current_index] = false;
-        }
+        int n = (int)ranked_players.size();
+        int best_diff = INT_MAX;
+        BoolVec best_mask(n, false);
 
-        // Option 2: skip this player
-        backtrack(current_index + 1,
-                  selected_count,
-                  required_count,
-                  best_diff,
-                  scores,
-                  total_sum,
-                  current_mask,
-                  best_mask,
-                  current_sum);
-    };
-
-    int n = (int)ranked_players.size();
-    int half1 = n / 2;
-    int half2 = (n % 2 == 1) ? (half1 + 1) : half1;
-
-    int best_diff = INT_MAX;
-    BoolVec best_mask(n, false);
-
-    // Try subsets of size half1 and half2 (covers even/odd cases)
-    for (int required_count : { half1, half2 })
-    {
-        int cur_sum = 0;
-        BoolVec cur_mask(n, false);
-
-        backtrack(/*current_index*/    0,
-                  /*selected_count*/   0,
-                  /*required_count*/   required_count,
-                  /*best_diff*/        best_diff,
-                  /*scores*/           scores,
-                  /*total_sum*/        total_sum,
-                  /*current_mask*/     cur_mask,
-                  /*best_mask*/        best_mask,
-                  /*current_sum*/      cur_sum);
-    }
-
-    // Decide randomly whether best_mask indicates RED or BLUE
-    bool start_red = (std::rand() % 2 == 0);
-
-    // Calculate final sums and apply teams
-    int sum_points_red  = 0;
-    int sum_points_blue = 0;
-
-    for (int i = 0; i < n; i++)
-    {
-        // If best_mask[i] == true => place on subset team
-        bool use_red = best_mask[i] ? start_red : !start_red;
-        KartTeam new_team = use_red ? KART_TEAM_RED : KART_TEAM_BLUE;
-
-        auto &profiles = ranked_players[i].peer->getPlayerProfiles();
-        if (!profiles.empty())
+        // Try subsets of *all* possible sizes from 1..(n-1).
+        // (If you allow empty teams, then start at 0 instead of 1.)
+        for (int required_count = 1; required_count < n; required_count++)
         {
-            profiles[0]->setTeam(new_team);
+            int cur_sum = 0;
+            BoolVec cur_mask(n, false);
+
+            backtrack(0,                  // current_index
+                      0,                  // selected_count
+                      required_count,     // how many in this subset
+                      best_diff,
+                      scores,
+                      total_sum,
+                      cur_mask,
+                      best_mask,
+                      cur_sum);
         }
 
-        // Update sums
-        if (new_team == KART_TEAM_RED)
+        // Decide randomly whether best_mask indicates RED or BLUE
+        bool start_red = (std::rand() % 2 == 0);
+
+        // Calculate final sums and apply teams
+        int sum_points_red  = 0;
+        int sum_points_blue = 0;
+
+        for (int i = 0; i < n; i++)
         {
-            sum_points_red += scores[i];
+            bool use_red = best_mask[i] ? start_red : !start_red;
+            KartTeam new_team = use_red ? KART_TEAM_RED : KART_TEAM_BLUE;
+
+            auto &p_profiles = ranked_players[i].peer->getPlayerProfiles();
+            if (!p_profiles.empty())
+            {
+                p_profiles[0]->setTeam(new_team);
+            }
+
+            // Update sums
+            if (new_team == KART_TEAM_RED)
+                sum_points_red += scores[i];
+            else
+                sum_points_blue += scores[i];
         }
-        else
+
+        send_message("Teams have been mixed by closest total scores!");
+
+        // Show a red/blue bar (only if total_score>0):
+        int total_score = sum_points_red + sum_points_blue;
+        if (total_score > 0)
         {
-            sum_points_blue += scores[i];
+            int red_percentage  = (sum_points_red  * 100) / total_score;
+            int blue_percentage = 100 - red_percentage;
+
+            int red_squares     = (red_percentage  + 5) / 10; // rounding
+            int blue_squares    = 10 - red_squares;           // total squares:10
+
+            std::wstring visualization;
+            visualization.append(red_squares,  L'\U0001F7E5'); // Red squares
+            visualization.append(blue_squares, L'\U0001F7E6'); // Blue squares
+
+            std::wstring result_msg = L"   Red " + std::to_wstring(red_percentage) + L"% - "
+                                      + std::to_wstring(blue_percentage) + L"% Blue\n"
+                                      + visualization;
+
+            // Send final message to all
+            irr::core::stringw irr_result_msg = result_msg.c_str();
+            NetworkString* net_str = getNetworkString();
+            net_str->addUInt8(LE_CHAT);
+            net_str->setSynchronous(true);
+            net_str->encodeString16(irr_result_msg);
+
+            for (auto& p : STKHost::get()->getPeers())
+                p->sendPacket(net_str, true);
+
+            delete net_str;
         }
+
+        // Update final assignments
+        updatePlayerList();
+
+        // Clear votes so we can't /mix again immediately
+        m_mix_voters.clear();
     }
-
-
-
-    // Send a message with final team distribution and difference
-    send_message("Teams have been mixed by closest total scores!");
-
-    // --------------------------------------------------
-    // Report Red/Blue distribution using squares & %:
-    // --------------------------------------------------
-    int total_score = sum_points_red + sum_points_blue;
-    Log::warn("ServerLobby", "total_score ="+ sum_points_red);
-    if (total_score > 0) // Avoid division by zero
-    {
-        int red_percentage  = (sum_points_red  * 100) / total_score;
-        int blue_percentage = 100 - red_percentage;
-
-        int red_squares  = (red_percentage  + 5) / 10;  // rounding
-        int blue_squares = 10 - red_squares;            // total squares: 10
-
-        // Build a wide string visualization
-        std::wstring visualization;
-        // Red squares (U+1F7E5), then blue squares (U+1F7E6)
-       // Create the visualization using square emojis
-        visualization.append(red_squares, L'\U0001F7E5');  // Red squares
-        visualization.append(blue_squares, L'\U0001F7E6'); // Blue squares
-
-        // Create the result message
-        std::wstring result_msg = L"   Red " + std::to_wstring(red_percentage) + L"% - " +
-                                  std::to_wstring(blue_percentage) + L"% Blue\n" + visualization;
-        std::string result_msg_str( result_msg.begin(), result_msg.end() );
-
-        // Convert std::wstring to irr::core::stringw
-        irr::core::stringw irr_result_msg = result_msg.c_str();
-
-        // Send the message to the peer
-        NetworkString* result = getNetworkString();
-        result->addUInt8(LE_CHAT);
-        result->setSynchronous(true);
-        result->encodeString16(irr_result_msg);
-        auto peers = STKHost::get()->getPeers();
-        for (auto& p : peers)
-            p->sendPacket(result, true /* reliable */);
-        delete result;
-
-    }
-    // Update final assignments
-    updatePlayerList();
-    // Clear votes so we can't /mix again immediately
-    m_mix_voters.clear();
 }
-}
-
-
 
 else if (argv[0] == "rank")
     {
