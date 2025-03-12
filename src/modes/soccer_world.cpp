@@ -638,7 +638,8 @@ void SoccerWorld::update(int ticks)
                 m_previous_approaching_hitter_half = m_previous_approaching_opponent_half;
                 m_previous_approaching_opponent_half = temp_bool;
             }
-
+            if (m_kart_scores[m_ball_hitter].m_name.empty())
+                m_kart_scores[m_ball_hitter].m_name = StringUtils::wideToUtf8(getKart(m_ball_hitter)->getController()->getName());
             // If either the ball hitter or 'approaching' flags changed, update scoring
             if ((hitter_changed || hitter_goal_changed || opponent_goal_changed) && (!RewindManager::get()->isRewinding()))
             {
@@ -646,13 +647,13 @@ void SoccerWorld::update(int ticks)
                 {
                     m_kart_scores[m_ball_hitter].attacking_pts += 1;
                     m_kart_scores[m_ball_hitter].total_pts     += 1;
-                   // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at opponent goal");
+                    //Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at opponent goal");
                 }
                 else if ((approaching_hitter_goal) && (!m_previous_approaching_hitter))
                 {
                     m_kart_scores[m_ball_hitter].bad_play_pts += -1;
                     m_kart_scores[m_ball_hitter].total_pts    += -1;
-                  //  Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at his goal");
+                   // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at his goal");
                 }
                 else if ((m_previous_approaching_hitter) && (!approaching_hitter_goal) && isBallBetweenRedAndBlueGates())
                 {
@@ -666,7 +667,7 @@ void SoccerWorld::update(int ticks)
                     // Defended opponent's goal
                     m_kart_scores[m_ball_hitter].bad_play_pts += -1;
                     m_kart_scores[m_ball_hitter].total_pts    += -1;
-                    //Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "Defended/missed opponent goal");
+                  //  Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "Defended/missed opponent goal");
                 }
             }
             else if ((hitter_changed || hitter_half_changed || opponent_half_changed) && (!RewindManager::get()->isRewinding()))
@@ -675,13 +676,13 @@ void SoccerWorld::update(int ticks)
                 {
                    m_kart_scores[m_ball_hitter].inddefending_pts += 1;
                    m_kart_scores[m_ball_hitter].total_pts     += 1;
-                  // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at opponent half");
+                 // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at opponent half");
                 }
                 else if ((approaching_hitter_half) && (!m_previous_approaching_hitter_half))
                 {
                     m_kart_scores[m_ball_hitter].bad_play_pts += -1;
                     m_kart_scores[m_ball_hitter].total_pts    += -1;
-                   // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at his half");
+                  // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at his half");
                 }
             }
 
@@ -1512,20 +1513,38 @@ void SoccerWorld::enterRaceOverState()
     // ─────────────────────────────────────────────
         // check if there's at least 1 red & 1 blue
         // ─────────────────────────────────────────────
-        int red_count = 0;
-        int blue_count = 0;
+        float red_count = 0;
+        float blue_count = 0;
         for (unsigned int i = 0; i < m_karts.size(); i++)
         {
         // If the name is empty, skip
         const std::string &kart_name = StringUtils::wideToUtf8(m_karts[i]->getController()->getName());
         if (kart_name.empty()) continue;
 
-        // If non-empty name, see which team
-        if (getKartTeam(i) == KART_TEAM_RED)  red_count  += 1;
-        if (getKartTeam(i) == KART_TEAM_BLUE) blue_count += 1;
+        int kart_id = m_karts[i]->getWorldKartId();
+
+        // If this kart never got incremented, presence_count=0 => 0 time
+        int presence_count = 0;
+        if (m_player_presence_count.find(kart_id) != m_player_presence_count.end())
+        {
+            presence_count = m_player_presence_count[kart_id];
         }
 
-        if ((red_count == 0) || (blue_count == 0) || ((red_count+blue_count) <= 2))
+        // Safeguard: avoid division by zero if the match ended instantly
+        float fraction = 0.0f;
+        if (m_presence_intervals_total > 0)
+        {
+            fraction = (float)presence_count / (float)m_presence_intervals_total;
+        }
+        if      (fraction < 0.0f) fraction = 0.0f;
+        else if (fraction > 1.0f) fraction = 1.0f;  // sanity clamp
+
+        // If non-empty name, see which team
+        if (getKartTeam(i) == KART_TEAM_RED)  red_count  += fraction;
+        if (getKartTeam(i) == KART_TEAM_BLUE) blue_count += fraction;
+        }
+
+        if ((red_count == 0.0f) || (blue_count == 0.0f) || ((red_count+blue_count) <= 2.0f))
         {
             // If either team is missing, skip the ranking logic or just warn:
             Log::warn("SoccerWorld",
@@ -1562,7 +1581,7 @@ void SoccerWorld::enterRaceOverState()
           "  matches_played  REAL,"
           "  matches_participated            INTEGER,"
           "  matches_won     INTEGER,"
-          "  team_members_count     INTEGER,"
+          "  team_members_count     REAL,"
           "  minutes_played_count     REAL"
           ");";
 
@@ -1654,7 +1673,7 @@ void SoccerWorld::enterRaceOverState()
                     // If that player’s team was the match winner => matches_won +1
                     int match_won_increment = getKartSoccerResult(i) ? 1 : 0;
 
-                    int team_members_count_increment = getKartTeam(i) == KART_TEAM_RED ? red_count : blue_count;
+                    float team_members_count_increment = getKartTeam(i) == KART_TEAM_RED ? red_count : blue_count;
 
                     // If no points were awarded at all, set both increments to 0
                     if (p.scoring_pts == 0 &&
@@ -1664,7 +1683,7 @@ void SoccerWorld::enterRaceOverState()
                     {
                         matches_participated_increment = 0;
                         match_won_increment = 0;
-                        team_members_count_increment =0;
+                        team_members_count_increment =0.0f;
                         match_played_increment = 0.0f;
                     }
 
@@ -1690,7 +1709,7 @@ void SoccerWorld::enterRaceOverState()
                     // 10) matches_won
                     sqlite3_bind_int(stmt, 10, match_won_increment);
                     // 11) team_members_count
-                    sqlite3_bind_int(stmt, 11, team_members_count_increment);
+                    sqlite3_bind_double(stmt, 11, team_members_count_increment);
                     // 12) minutes_played_count
                     sqlite3_bind_double(stmt, 12, minutes_played_increment);
 
