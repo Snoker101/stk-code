@@ -716,7 +716,7 @@ void ServerLobby::updateTracksForMode()
             float matchesPlayed      = (float)sqlite3_column_double(stmt_fetch, 8);
             int   matchesParticipated= sqlite3_column_int(stmt_fetch, 9);
             int   matchesWon         = sqlite3_column_int(stmt_fetch, 10);
-            float teamMembersCount   = (float)sqlite3_column_int(stmt_fetch, 11);
+            float teamMembersCount   = (float)sqlite3_column_double(stmt_fetch, 11);
             float minutesPlayedCount = (float)sqlite3_column_double(stmt_fetch, 12);
 
             // -------------------------------------------------
