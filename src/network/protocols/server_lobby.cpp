@@ -197,7 +197,7 @@ std::pair<int, int> getPlayerInfo(std::string playerName) {
         }
     }
 
-    // Second try: search in "soccer_ranking_2.txt"
+    // Second try: search in "soccer_ranking_fixed.txt"
     {
         std::ifstream file("soccer_ranking_fixed.txt");
         std::string line;
@@ -215,10 +215,100 @@ std::pair<int, int> getPlayerInfo(std::string playerName) {
         }
     }
 
-    // Return {-1, -1} if the player is not found in either file.
+    // Third try: search in "db_table_copy.txt"
+    {
+        std::ifstream file("db_table_copy.txt");
+        if (!file.is_open()) {
+            // Could not open the file at all
+            return {-1, -1};
+        }
+
+        std::string line;
+        // Skip the header line
+        if (!std::getline(file, line)) {
+            // File empty or missing header
+            return {-1, -1};
+        }
+
+        // CSV format (header for reference):
+        // PlayerName,ScoringPts,AttackingPts,DefendingPts,IndDefendingPts,BadPlayPts,Total,Rank,
+        // matches_played,matches_participated,matches_won,team_members_count,minutes_played_count
+        while (std::getline(file, line)) {
+            std::stringstream ss(line);
+
+            // Read CSV fields
+            std::string csvPlayerName;
+            std::string scoringPtsStr, attackingPtsStr, defendingPtsStr, indDefendingPtsStr, badPlayPtsStr;
+            std::string totalStr, rankStr;
+            std::string matchesPlayedStr, matchesParticipatedStr, matchesWonStr, teamMembersCountStr, minutesPlayedStr;
+
+            // Extract each CSV field in order
+            if (!std::getline(ss, csvPlayerName, ',')) continue;
+            if (!std::getline(ss, scoringPtsStr, ',')) continue;
+            if (!std::getline(ss, attackingPtsStr, ',')) continue;
+            if (!std::getline(ss, defendingPtsStr, ',')) continue;
+            if (!std::getline(ss, indDefendingPtsStr, ',')) continue;
+            if (!std::getline(ss, badPlayPtsStr, ',')) continue;
+            if (!std::getline(ss, totalStr, ',')) continue;
+            if (!std::getline(ss, rankStr, ',')) continue;
+            if (!std::getline(ss, matchesPlayedStr, ',')) continue;
+            if (!std::getline(ss, matchesParticipatedStr, ',')) continue;
+            if (!std::getline(ss, matchesWonStr, ',')) continue;
+            if (!std::getline(ss, teamMembersCountStr, ',')) continue;
+            if (!std::getline(ss, minutesPlayedStr, ',')) continue;
+
+            // Check if this line corresponds to the given player
+            if (csvPlayerName == playerName) {
+                // Convert relevant columns to float for calculations
+                float scoringPts       = std::stof(scoringPtsStr);
+                float attackingPts     = std::stof(attackingPtsStr);
+                float defendingPts     = std::stof(defendingPtsStr);
+                float indDefendingPts  = std::stof(indDefendingPtsStr);
+                float badPlayPts       = std::stof(badPlayPtsStr);
+                float matchesPlayed    = std::stof(matchesPlayedStr);
+                float matchesPart      = std::stof(matchesParticipatedStr);
+                float teamMembersCount = std::stof(teamMembersCountStr);
+
+                // Calculate per-match stats
+                float scoringPtsPerMatch =
+                    (matchesPlayed == 0.0f) ? 0.0f
+                    : std::round((scoringPts / matchesPlayed) * 100.0f) / 100.0f;
+
+                float attackingPtsPerMatch =
+                    (matchesPlayed == 0.0f) ? 0.0f
+                    : std::round((attackingPts / matchesPlayed) * 100.0f) / 100.0f;
+
+                float defendingPtsPerMatch =
+                    (matchesPlayed == 0.0f) ? 0.0f
+                    : std::round(((defendingPts + indDefendingPts) / matchesPlayed) * 100.0f) / 100.0f;
+
+                float badPlayPtsPerMatch =
+                    (matchesPlayed == 0.0f) ? 0.0f
+                    : std::round((badPlayPts / matchesPlayed) * 100.0f) / 100.0f;
+
+                float teamMembersCountPerMatch =
+                    (matchesPart == 0.0f) ? 0.0f
+                    : std::round((teamMembersCount / matchesPart) * 100.0f) / 100.0f;
+
+                float totalPerMatchFloat = std::round(
+                    (scoringPtsPerMatch
+                     + attackingPtsPerMatch
+                     + defendingPtsPerMatch
+                     + badPlayPtsPerMatch)
+                     * teamMembersCountPerMatch
+                    * 100.0f
+                ) / 100.0f;
+
+                // Round to nearest integer before returning
+                int totalPerMatch = static_cast<int>(std::lround(totalPerMatchFloat));
+                return {1, totalPerMatch};
+            }
+        }
+    }
+
+    // If not found in any file
     return {-1, -1};
 }
-
 std::pair<int, int> getPlayerInfoCurrentRanking(std::string playerName) {
     std::vector<Player> players;
     std::ifstream file("soccer_ranking.txt");
