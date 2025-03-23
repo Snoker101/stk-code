@@ -252,7 +252,11 @@ void OptionsScreenVideo::init()
     vsync->clearLabels();
     //I18N: In the video options
     vsync->addLabel(_("Vertical Sync"));
+#ifdef MOBILE_STK
+    std::set<int> fps = { 30, 60, 120 };
+#else
     std::set<int> fps = { 30, 60, 120, 180, 250, 500, 1000 };
+#endif
     fps.insert(UserConfigParams::m_max_fps);
     for (auto& i : fps)
         vsync->addLabel(core::stringw(i));
@@ -429,6 +433,14 @@ void OptionsScreenVideo::updateScaleRTTsSlider()
         {
             scale_rtts_level->setValue(l);
             found = true;
+            if (m_scale_rtts_custom_presets[l].value > 1.0f)
+            {
+                scale_rtts_level->markAsIncorrect();
+            }
+            else
+            {
+                scale_rtts_level->markAsCorrect();
+            }
             break;
         }
     }
