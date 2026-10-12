@@ -64,11 +64,20 @@ bool Cake::hit(AbstractKart* kart, PhysicalObject* obj)
     bool was_real_hit = Flyable::hit(kart, obj);
     if(was_real_hit)
     {
-        if(kart && kart->isShielded())
+        if(kart) // Ensure that kart is not NULL before calling setEnergy
         {
-            kart->decreaseShieldTime();
-            return false; //Not sure if a shield hit is a real hit.
+            if(kart->isShielded())
+            {
+                kart->decreaseShieldTime();
+                return false; // Not sure if a shield hit is a real hit.
+            }
+            else
+            {
+                if (kart->getEnergy() >= 5.0f) kart->setEnergy(kart->getEnergy()-5.0f);
+                else kart->setEnergy(0.0f);
+            }
         }
+
         explode(kart, obj);
     }
 
@@ -95,12 +104,15 @@ void Cake::onFireFlyable()
 
     float up_velocity = m_speed/7.0f;
 
-    // give a speed proportional to kart speed. m_speed is defined in flyable
-    m_speed *= m_owner->getSpeed() / 23.0f;
+    const bool  backwards = m_owner->getControls().getLookBack();
 
-    //when going backwards, decrease speed of cake by less
-    if (m_owner->getSpeed() < 0) m_speed /= 3.6f;
-
+    // give a speed proportional to kart speed. m_speed is defined in flyable.
+    // when going backwards and not looking backwards,
+    // decrease speed of cake by less
+    if (m_owner->getSpeed() < 0 && !backwards)
+        m_speed *= m_owner->getSpeed() / 23.0f /3.6f;
+    else
+    m_speed *= abs(m_owner->getSpeed()) / 23.0f;
     m_speed += 16.0f;
 
     if (m_speed < 1.0f) m_speed = 1.0f;
@@ -111,7 +123,7 @@ void Cake::onFireFlyable()
     float pitch = m_owner->getTerrainPitch(heading);
 
     // Find closest kart in front of the current one
-    const bool  backwards = m_owner->getControls().getLookBack();
+
     const AbstractKart *closest_kart=NULL;
     Vec3        direction;
     float       kart_dist_squared;

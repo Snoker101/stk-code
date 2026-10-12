@@ -126,6 +126,19 @@ private:
     /** Timeout counter for various state. */
     std::atomic<int64_t> m_timeout;
 
+    /** Soccer start position vote: end time in ms, 0 if no vote running. */
+    std::atomic<int64_t> m_position_vote_end;
+
+    /** Seconds left last shown in the lobby player list. */
+    int m_position_vote_shown_secs;
+
+    /** Start position (1 based) voted by each player, also read by
+     *  updatePlayerList so it's guarded by the mutex. */
+    std::mutex m_position_votes_mutex;
+    std::map<std::weak_ptr<NetworkPlayerProfile>, int,
+        std::owner_less<std::weak_ptr<NetworkPlayerProfile> > >
+        m_position_votes;
+
     std::mutex m_keys_mutex;
 
     std::map<uint32_t, KeyData> m_keys;
@@ -179,6 +192,13 @@ private:
 
     // connection management
     void clientDisconnected(Event* event);
+    bool startPositionVote();
+    int getPositionVoteSecondsLeft() const;
+    bool handlePositionVote(const std::string& text,
+                            std::shared_ptr<STKPeer> peer);
+    void applyPositionVotes(
+        std::vector<std::shared_ptr<NetworkPlayerProfile> >& players,
+        const std::string& track_name);
     void connectionRequested(Event* event);
     // kart selection
     void kartSelectionRequested(Event* event);
@@ -255,7 +275,7 @@ private:
     void getRankingForPlayer(std::shared_ptr<NetworkPlayerProfile> p);
     void submitRankingsToAddons();
     void computeNewRankings();
-    void checkRaceFinished();
+    void checkRaceFinished(bool endnow = false);
     void getHitCaptureLimit();
     void configPeersStartTime();
     void resetServer();
@@ -327,6 +347,12 @@ public:
 
     void updatePlayerList(bool update_when_reset_server = false);
     void startSelection(const Event *event=NULL);
+    void handleSnoccerCommand(const std::string& cmd,
+                              std::shared_ptr<STKPeer> peer);
+    void send_message(std::string msg);
+    void send_private_message(const std::string &msg, std::shared_ptr<STKPeer> target_peer);
+    bool losing_team_weaker();
+    int getSoccerScoreDifference() const;
     void checkIncomingConnectionRequests();
     void finishedLoadingWorld() OVERRIDE;
     ServerState getCurrentState() const { return m_state.load(); }

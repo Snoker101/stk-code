@@ -206,8 +206,24 @@ namespace ChatCommands
         auto argv = StringUtils::split(cmd, ' ');
         if (argv.size() == 0)
             return;
-        if (argv[0] == "help")
-            help(cmd, peer);
+        // Snoccer commands share the upstream decoder so the packet is read once.
+        // Keep the fork's custom help and password-based kick behavior.
+        if (argv[0] == "powerupper" || argv[0] == "endrace" ||
+            argv[0] == "setlimit" || argv[0] == "positionvote" ||
+            argv[0] == "tip" ||
+            argv[0] == "teams" || argv[0] == "mix" ||
+            argv[0] == "autoteams" || argv[0] == "randomteams" ||
+            argv[0] == "rank" || argv[0] == "top" ||
+            argv[0] == "score" || argv[0] == "poss" || argv[0] == "bye" ||
+            argv[0] == "changeteam" || argv[0] == "ct" ||
+            argv[0] == "help" || argv[0] == "alldata" || argv[0] == "stats" ||
+            argv[0] == "new" || argv[0] == "about" || argv[0] == "kick")
+        {
+            lobby->handleSnoccerCommand(cmd, peer);
+            return;
+        }
+        if (argv[0] == "s")
+            spectate("spectate" + cmd.substr(1), lobby, peer);
         else if (argv[0] == "spectate")
             spectate(cmd, lobby, peer);
         else if (argv[0] == "listserveraddon")

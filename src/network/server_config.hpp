@@ -290,6 +290,15 @@ namespace ServerConfig
         "Time in seconds to deactivate a flag when it's captured or returned "
         "to own base by players."));
 
+    SERVER_CFG_PREFIX IntServerConfigParam m_pros_limit
+        SERVER_CFG_DEFAULT(IntServerConfigParam(0, "pros-limit",
+        "set 0 if allow all players. Set number to allow top number only."));
+
+    SERVER_CFG_PREFIX FloatServerConfigParam m_position_vote_time
+        SERVER_CFG_DEFAULT(FloatServerConfigParam(15.0f, "position-vote-time",
+        "Soccer only: seconds players can vote for their start position "
+        "(1-7) in chat before kart selection. Set 0 to disable."));
+
     SERVER_CFG_PREFIX IntServerConfigParam m_hit_limit
         SERVER_CFG_DEFAULT(IntServerConfigParam(20, "hit-limit",
         "Hit limit of free for all, zero to disable hit limit."));
