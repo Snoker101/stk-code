@@ -295,7 +295,7 @@ namespace ServerConfig
         "set 0 if allow all players. Set number to allow top number only."));
 
     SERVER_CFG_PREFIX FloatServerConfigParam m_position_vote_time
-        SERVER_CFG_DEFAULT(FloatServerConfigParam(15.0f, "position-vote-time",
+        SERVER_CFG_DEFAULT(FloatServerConfigParam(20.0f, "position-vote-time",
         "Soccer only: seconds players can vote for their start position "
         "(1-7) in chat before kart selection. Set 0 to disable."));
 

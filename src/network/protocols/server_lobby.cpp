@@ -1214,6 +1214,38 @@ int ServerLobby::getPositionVoteSecondsLeft() const
 }   // getPositionVoteSecondsLeft
 
 //-----------------------------------------------------------------------------
+/** The position vote can end before its time is up when there is only one
+ *  player, or one player in each team, and all of them have voted.
+ */
+bool ServerLobby::canEndPositionVoteEarly()
+{
+    std::vector<std::shared_ptr<NetworkPlayerProfile> > players;
+    for (auto& peer : STKHost::get()->getPeers())
+    {
+        if (!peer->isValidated() || peer->isWaitingForGame() ||
+            peer->alwaysSpectate() || peer->isAIPeer())
+            continue;
+        for (auto& player : peer->getPlayerProfiles())
+            players.push_back(player);
+    }
+    if (players.empty() || players.size() > 2)
+        return false;
+    // Without team choosing two players are always split in two teams
+    // (see GameSetup::sortPlayersForGame)
+    if (players.size() == 2 && ServerConfig::m_team_choosing &&
+        players[0]->getTeam() == players[1]->getTeam())
+        return false;
+
+    std::lock_guard<std::mutex> lock(m_position_votes_mutex);
+    for (auto& player : players)
+    {
+        if (m_position_votes.find(player) == m_position_votes.end())
+            return false;
+    }
+    return true;
+}   // canEndPositionVoteEarly
+
+//-----------------------------------------------------------------------------
 /** Records a start position vote if the chat message is one.
  *  \param text Chat message without the "name: " prefix.
  *  \return True if the message was a vote and must not be broadcast.
@@ -1701,6 +1733,10 @@ void ServerLobby::asynchronousUpdate()
     }
     case WAITING_FOR_START_GAME:
     {
+        // End the vote now if nobody else can still vote, see
+        // canEndPositionVoteEarly
+        if (m_position_vote_end != 0 && canEndPositionVoteEarly())
+            m_position_vote_end = (int64_t)StkTime::getMonoTimeMs();
         // Count down in the lobby player list instead of spamming chat
         if (m_position_vote_end != 0 &&
             getPositionVoteSecondsLeft() != m_position_vote_shown_secs)

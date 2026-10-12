@@ -194,6 +194,7 @@ private:
     void clientDisconnected(Event* event);
     bool startPositionVote();
     int getPositionVoteSecondsLeft() const;
+    bool canEndPositionVoteEarly();
     bool handlePositionVote(const std::string& text,
                             std::shared_ptr<STKPeer> peer);
     void applyPositionVotes(
