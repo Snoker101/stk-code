@@ -22,6 +22,7 @@
 #include "audio/sfx_base.hpp"
 #include "config/user_config.hpp"
 #include "io/file_manager.hpp"
+#include "items/powerup_manager.hpp"
 #include "graphics/irr_driver.hpp"
 #include "graphics/camera/camera_normal.hpp"
 #include "karts/abstract_kart_animation.hpp"
@@ -32,6 +33,8 @@
 #include "network/network_config.hpp"
 #include "network/network_string.hpp"
 #include "network/protocols/game_events_protocol.hpp"
+#include "network/protocols/server_lobby.hpp"
+#include "network/rewind_manager.hpp"
 #include "network/stk_host.hpp"
 #include "network/stk_peer.hpp"
 #include "physics/physics.hpp"
@@ -50,8 +53,69 @@
 #include <IMeshSceneNode.h>
 #include <numeric>
 #include <string>
+#include <fstream>
+#include <algorithm> // For std::sort
+#include <sstream>
+#include <map>
+
+
+#include <cassert>
+#include <iostream>
+#include <vector>
+#include <ctime>
+#include <cstdio>       // for rename()
+#include <dirent.h>     // for opendir(), readdir(), closedir()
+
+#include "sqlite3.h" //  You will have to install the package libsqlite3-dev. For ubuntu: "sudo apt install libsqlite3-dev"
+                    // and build game with sqlite3 on: "cmake .. -DNO_SHADERC=on ENABLE_SQLITE3"
 
 //=============================================================================
+namespace
+{
+    // A typed function-pointer approach for retrieving a particular integer field.
+    // Example usage: findTopInField(m_kart_scores, &getTotalPts)
+
+    typedef int(*FieldGetter)(const KartScore&);
+
+    // These "getter" functions return whichever field we want.
+    int getTotalPts   (const KartScore &k) { return k.total_pts;    }
+    int getAttacking  (const KartScore &k) { return k.attacking_pts;}
+    int getDefending  (const KartScore &k) { return k.defending_pts + k.inddefending_pts;}
+    int getScoring    (const KartScore &k) { return k.scoring_pts;  }
+
+    // This function scans all `KartScore` objects, finds the maximum value
+    // for a given field (determined by `getter`), and returns a pair:
+    // (max_value, vector_of_names_that_share_max). If the `max_value` ≤ 0,
+    // "none" is interpreted.
+    std::pair<int, std::vector<std::string>>
+    findTopInField(const std::vector<KartScore>& scores, FieldGetter getter)
+    {
+        int max_val = std::numeric_limits<int>::min();
+
+        // 1) Find the maximum value
+        for (size_t i = 0; i < scores.size(); i++)
+        {
+            if (scores[i].m_name.empty()) continue;
+            int val = getter(scores[i]);
+            if (val > max_val) max_val = val;
+        }
+
+        // 2) Gather names if `max_val > 0`
+        std::vector<std::string> top_names;
+        if (max_val > 0)
+        {
+            for (size_t i = 0; i < scores.size(); i++)
+            {
+                if (scores[i].m_name.empty()) continue;
+                if (getter(scores[i]) == max_val)
+                    top_names.push_back(scores[i].m_name);
+            }
+        }
+
+        return std::make_pair(max_val, top_names);
+    }
+} // end anonymous namespace
+
 class BallGoalData
 {
 // These data are used by AI to determine ball aiming angle
@@ -231,6 +295,29 @@ public:
         m_red_check_goal->reset(*t);
         m_blue_check_goal->reset(*t);
     }
+
+    // ------------------------------------------------------------------------
+    /** Returns the center point of the given team's goal.
+     *  If that goal pointer is missing, returns Vec3(0,0,0).
+     */
+    Vec3 getGoalCenter(KartTeam team) const
+    {
+        if (team == KART_TEAM_BLUE)
+        {
+            if (!m_blue_check_goal) return Vec3(0, 0, 0);
+            return m_blue_check_goal->getPoint(CheckGoal::POINT_CENTER);
+        }
+        else
+        {
+            if (!m_red_check_goal) return Vec3(0, 0, 0);
+            return m_red_check_goal->getPoint(CheckGoal::POINT_CENTER);
+        }
+    }   // getGoalCenter
+
+    CheckGoal* getCheckGoal(KartTeam team) const
+    {
+    return (team == KART_TEAM_BLUE) ? m_blue_check_goal : m_red_check_goal;
+    }
 };   // BallGoalData
 
 //-----------------------------------------------------------------------------
@@ -274,17 +361,51 @@ SoccerWorld::~SoccerWorld()
 /** Initializes the soccer world. It sets up the data structure
  *  to keep track of points etc. for each kart.
  */
+int once = 1;
+int write_once = 1;
+int once_blue_five = 1;
+int once_red_five = 1;
+
 void SoccerWorld::init()
 {
+    once = 1;
+    once_blue_five = 1;
+    once_red_five = 1;
+    write_once = 1;
     m_kart_team_map.clear();
     m_kart_position_map.clear();
+
+    m_presence_intervals_total = 0;
+    m_player_presence_count.clear();
+    m_player_last_position.clear();
+    m_player_last_name.clear();
+
     WorldWithRank::init();
     m_display_rank = false;
     m_ball_hitter  = -1;
+    m_ball_hitter_red = -1;
+    m_ball_hitter_blue = -1;
     m_ball         = NULL;
     m_ball_body    = NULL;
     m_goal_target  = RaceManager::get()->getMaxGoal();
     m_goal_sound   = SFXManager::get()->createSoundSource("goal_scored");
+
+    // Clear out any old data from previous matches
+    m_kart_scores.clear();
+    m_previous_ball_hitter          = -1;
+    m_previous_approaching_hitter   = false;
+    m_previous_approaching_opponent = false;
+
+    m_previous_approaching_hitter_half   = false;
+    m_previous_approaching_opponent_half = false;
+
+    // For each kart, record its name and zero the score
+    for (unsigned int i = 0; i < m_karts.size(); i++)
+    {
+        KartScore ks;
+        ks.m_name  = StringUtils::wideToUtf8(getKart(i)->getController()->getName()).c_str();
+        m_kart_scores.push_back(ks);
+    }
 
     Track *track = Track::getCurrentTrack();
     if (track->hasNavMesh())
@@ -436,6 +557,7 @@ void SoccerWorld::update(int ticks)
 
     if (isGoalPhase())
     {
+        m_ball_hitter  = -1;
         for (unsigned int i = 0; i < m_karts.size(); i++)
         {
             auto& kart = m_karts[i];
@@ -461,6 +583,210 @@ void SoccerWorld::update(int ticks)
                 getKart(8)->flyUp();
         }
     }
+
+    // ------------------------------------------------------------------------
+    // NEW: Update the last hitter’s score based on whether the ball is
+    // approaching that hitter’s gate or the opposing gate.
+    // ------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // STEP 1: Add a static (or member) counter to ensure scoring updates
+    //         are performed only once every 50 ticks.
+    // -------------------------------------------------------------------------
+    static int s_score_update_counter = 0;
+    s_score_update_counter += ticks;
+    if ((s_score_update_counter >= 50) && (!isRaceOver()))
+    {
+        // Reset the counter so it updates again in another 50 ticks
+        s_score_update_counter = 0;
+
+        // ---------------------------------------------------------------------
+        // STEP 2: Move the existing scoring logic so it’s only called
+        //         when s_score_update_counter >= 5.
+        // ---------------------------------------------------------------------
+        if ((m_ball_hitter >= 0) && (m_ball_hitter < (int)m_karts.size()))
+        {
+             KartTeam hitter_team = getKartTeam(m_ball_hitter);
+             KartTeam opponent_team = (hitter_team == KART_TEAM_RED) ? KART_TEAM_BLUE : KART_TEAM_RED;
+
+            // Each frame that the ball is “owned” by a team, add 1 to that team’s counter
+            if (hitter_team == KART_TEAM_RED)
+            {
+                m_ball_possession_red++;
+            }
+            else if (hitter_team == KART_TEAM_BLUE)
+            {
+                m_ball_possession_blue++;
+            }
+
+            bool approaching_hitter_goal   = isBallMovingTowardGoal(hitter_team);
+            bool approaching_opponent_goal = isBallMovingTowardGoal(opponent_team);
+
+            bool approaching_hitter_half  = isBallMovingTowardHalf(hitter_team);
+            bool approaching_opponent_half = isBallMovingTowardHalf(opponent_team);
+
+            bool hitter_changed = (m_ball_hitter != m_previous_ball_hitter);
+            bool hitter_goal_changed  = (approaching_hitter_goal   != m_previous_approaching_hitter);
+            bool opponent_goal_changed = (approaching_opponent_goal != m_previous_approaching_opponent);
+
+            bool hitter_half_changed  = (approaching_hitter_half   != m_previous_approaching_hitter_half);
+            bool opponent_half_changed = (approaching_opponent_half != m_previous_approaching_opponent_half);
+
+            bool temp_bool = false;
+            if (getKartTeam(m_ball_hitter) != getKartTeam(m_previous_ball_hitter))
+            {
+                temp_bool = m_previous_approaching_hitter;
+                m_previous_approaching_hitter = m_previous_approaching_opponent;
+                m_previous_approaching_opponent = temp_bool;
+
+                temp_bool = m_previous_approaching_hitter_half;
+                m_previous_approaching_hitter_half = m_previous_approaching_opponent_half;
+                m_previous_approaching_opponent_half = temp_bool;
+            }
+            if (m_kart_scores[m_ball_hitter].m_name.empty())
+                m_kart_scores[m_ball_hitter].m_name = StringUtils::wideToUtf8(getKart(m_ball_hitter)->getController()->getName());
+            // If either the ball hitter or 'approaching' flags changed, update scoring
+            if ((hitter_changed || hitter_goal_changed || opponent_goal_changed) && (!RewindManager::get()->isRewinding()))
+            {
+                if (approaching_opponent_goal)
+                {
+                    m_kart_scores[m_ball_hitter].attacking_pts += 1;
+                    m_kart_scores[m_ball_hitter].total_pts     += 1;
+                    //Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at opponent goal");
+                }
+                else if ((approaching_hitter_goal) && (!m_previous_approaching_hitter))
+                {
+                    m_kart_scores[m_ball_hitter].bad_play_pts += -1;
+                    m_kart_scores[m_ball_hitter].total_pts    += -1;
+                   // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at his goal");
+                }
+                else if ((m_previous_approaching_hitter) && (!approaching_hitter_goal) && isBallBetweenRedAndBlueGates())
+                {
+                    // Defended your own goal
+                    m_kart_scores[m_ball_hitter].defending_pts += 1;
+                    m_kart_scores[m_ball_hitter].total_pts     += 1;
+                   // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "Defended his goal");
+                }
+                else if ((m_previous_approaching_opponent) && (!approaching_opponent_goal) && (hitter_changed) && (isBallBetweenRedAndBlueGates()))
+                {
+                    // Defended opponent's goal
+                    m_kart_scores[m_ball_hitter].bad_play_pts += -1;
+                    m_kart_scores[m_ball_hitter].total_pts    += -1;
+                  //  Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "Defended/missed opponent goal");
+                }
+            }
+            else if ((hitter_changed || hitter_half_changed || opponent_half_changed) && (!RewindManager::get()->isRewinding()))
+            {
+                if (approaching_opponent_half)
+                {
+                   m_kart_scores[m_ball_hitter].inddefending_pts += 1;
+                   m_kart_scores[m_ball_hitter].total_pts     += 1;
+                 // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at opponent half");
+                }
+                else if ((approaching_hitter_half) && (!m_previous_approaching_hitter_half))
+                {
+                    m_kart_scores[m_ball_hitter].bad_play_pts += -1;
+                    m_kart_scores[m_ball_hitter].total_pts    += -1;
+                  // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "shoot at his half");
+                }
+            }
+
+            // Save state for next scoring check
+            m_previous_ball_hitter          = m_ball_hitter;
+            m_previous_approaching_hitter   = approaching_hitter_goal;
+            m_previous_approaching_opponent = approaching_opponent_goal;
+
+            m_previous_approaching_hitter_half   = approaching_hitter_half;
+            m_previous_approaching_opponent_half = approaching_opponent_half;
+        }
+        else
+        {
+            // If no valid hitter, reset approach flags (or leave them alone if you prefer)
+            m_previous_ball_hitter          = -1;
+            m_previous_approaching_hitter   = false;
+            m_previous_approaching_opponent = false;
+
+            m_previous_approaching_hitter_half   = false;
+            m_previous_approaching_opponent_half = false;
+        }
+    }
+    // -------------------------------------------------------------------------
+    static int s_presence_update_counter = 0;
+    s_presence_update_counter += ticks;
+    if ((s_presence_update_counter >= 1000) && (!isRaceOver()))
+{
+    // Reset the counter so it updates again in another 50 ticks
+    s_presence_update_counter = 0;
+
+    for (unsigned int i = 0; i < m_karts.size(); i++)
+    {
+        const std::string player_name =
+            StringUtils::wideToUtf8(m_karts[i]->getController()->getName());
+        if (player_name.empty()) continue;
+
+        int kart_id = m_karts[i]->getWorldKartId();
+
+        // ─────────────────────────────────────────────────────────────
+        // NEW STEP: check if this kart’s name changed since last time
+        // ─────────────────────────────────────────────────────────────
+        auto it_name = m_player_last_name.find(kart_id);
+        if (it_name == m_player_last_name.end())
+        {
+            // First time seeing this kart id, just store its name
+            m_player_last_name[kart_id] = player_name;
+        }
+        else
+        {
+            if (it_name->second != player_name)
+            {
+                // The name for this kart id changed!
+                // 1) Update the stored name
+                it_name->second = player_name;
+
+                // 2) Reset presence counter
+                m_player_presence_count[kart_id] = 0;
+
+                // 3) Reset the scoreboard for this kart.
+                //    We can search for the correct index in m_kart_scores
+                //    by matching the same i or by matching name.
+                //    Typically, “i” is the same index for m_kart_scores,
+                //    so we can do:
+                m_kart_scores[i].scoring_pts   = 0;
+                m_kart_scores[i].attacking_pts = 0;
+                m_kart_scores[i].defending_pts = 0;
+                m_kart_scores[i].inddefending_pts = 0;
+                m_kart_scores[i].bad_play_pts  = 0;
+                m_kart_scores[i].total_pts     = 0;
+
+                //    If you prefer to erase the old name entirely so the new name can
+                //    be appended, you can also do (optional):
+                m_kart_scores[i].m_name = player_name;
+            }
+        }
+        // ─────────────────────────────────────────────────────
+        // Name check done. Now do your presence logic as before
+        // ─────────────────────────────────────────────────────
+        Vec3 current_pos = m_karts[kart_id]->getXYZ();
+
+        if (m_player_last_position.find(kart_id) == m_player_last_position.end())
+        {
+            m_player_presence_count[kart_id]++;
+            m_player_last_position[kart_id] = current_pos;
+        }
+        else
+        {
+            Vec3 last_pos = m_player_last_position[kart_id];
+            if (current_pos != last_pos)
+            {
+                m_player_presence_count[kart_id]++;
+            }
+            m_player_last_position[kart_id] = current_pos;
+        }
+    } // end for
+
+
+    // We have hit the "50-tick" interval one more time
+    m_presence_intervals_total++;
+}
     if (UserConfigParams::m_arena_ai_stats)
         m_frame_count++;
 
@@ -486,6 +812,7 @@ void SoccerWorld::update(int ticks)
 //-----------------------------------------------------------------------------
 void SoccerWorld::onCheckGoalTriggered(bool first_goal)
 {
+    auto sl = LobbyProtocol::get<ServerLobby>();
     if (isRaceOver() || isStartPhase() ||
         (NetworkConfig::get()->isNetworking() &&
         NetworkConfig::get()->isClient()))
@@ -506,6 +833,20 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
                 std::accumulate(m_goal_frame.begin(), m_goal_frame.end(), 0);
             m_goal_frame.push_back(m_frame_count - elapsed_frame);
         }
+
+        if (!isCorrectGoal(m_ball_hitter, first_goal))
+        {
+         // m_kart_scores[m_ball_hitter].bad_play_pts += -1;
+         // m_kart_scores[m_ball_hitter].total_pts    += -1;
+         // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "scored a goal!");
+          KartTeam team = getKartTeam(m_ball_hitter);
+          if (team == KART_TEAM_RED && m_ball_hitter_blue != -1) m_ball_hitter = m_ball_hitter_blue;
+          else if (team == KART_TEAM_BLUE && m_ball_hitter_red != -1) m_ball_hitter = m_ball_hitter_red;
+        }
+
+        m_kart_scores[m_ball_hitter].scoring_pts += 1;
+        m_kart_scores[m_ball_hitter].total_pts   += 1;
+        // Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "scored a goal!!");
 
         ScorerData sd = {};
         sd.m_id = m_ball_hitter;
@@ -606,6 +947,58 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         kart->getBody()->setAngularVelocity(Vec3(0.0f));
         m_goal_transforms[i] = kart->getBody()->getWorldTransform();
     }
+
+    if((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 4) && (powerup_multiplier_value() == 1) && (!isRaceOver()) && (once == 1))
+    {
+        if (sl->losing_team_weaker())
+        {
+        set_powerup_multiplier(3);
+            sl->send_message("Powerupper on (automatically)");
+            once =2;
+        }
+    }
+
+    if ((once == 2) && (powerup_multiplier_value() == 1) && (sl->losing_team_weaker()) && (!isRaceOver()))
+    {
+    set_powerup_multiplier(3);
+        sl->send_message("Powerupper on (automatically)");
+    }
+
+    if ((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) != 0) && (powerup_multiplier_value() == 3) && (!sl->losing_team_weaker()) && (!isRaceOver()))
+    {
+    set_powerup_multiplier(1);
+        sl->send_message("Powerupper off (automatically)");
+    }
+
+    if(getScore(KART_TEAM_BLUE) == 5 && once_blue_five == 1 )
+    {
+        auto poss = getBallPossession();
+        int red_possession  = poss.first;
+        int blue_possession = poss.second;
+        sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
+
+        once_blue_five = 2;
+    }
+    if(getScore(KART_TEAM_RED) == 5 && once_red_five == 1)
+    {
+        auto poss = getBallPossession();
+        int red_possession  = poss.first;
+        int blue_possession = poss.second;
+        sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
+
+        once_red_five = 2;
+    }
+    if(isRaceOver())
+    {
+        auto poss = getBallPossession();
+        int red_possession  = poss.first;
+        int blue_possession = poss.second;
+        sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
+    }
+
+    m_ball_hitter_red = -1;
+    m_ball_hitter_blue = -1;
+    m_ball_hitter = -1;
 }   // onCheckGoalTriggered
 
 //-----------------------------------------------------------------------------
@@ -634,6 +1027,21 @@ void SoccerWorld::handlePlayerGoalFromServer(const NetworkString& ns)
     int ticks_back_to_own_goal = ns.getTime();
     ns.decodeString(&sd.m_kart);
     ns.decodeStringW(&sd.m_player);
+
+   /*
+     // Insert the new scoring lines:
+    if (sd.m_correct_goal)
+    {
+        m_kart_scores[sd.m_id].scoring_pts += 1;
+        m_kart_scores[sd.m_id].total_pts   += 1;
+        Log::verbose((m_kart_scores[m_ball_hitter].m_name).c_str(), "scored a goal!");
+    }
+    else
+    {
+        m_kart_scores[sd.m_id].bad_play_pts += -1;
+        m_kart_scores[sd.m_id].total_pts    += -1;
+    }*/
+
     // Added in 1.1, add missing handicap info and country code
     if (NetworkConfig::get()->getServerCapabilities().find("soccer_fixes")
         != NetworkConfig::get()->getServerCapabilities().end())
@@ -740,6 +1148,9 @@ void SoccerWorld::resetKartsToSelfGoals()
 void SoccerWorld::setBallHitter(unsigned int kart_id)
 {
     m_ball_hitter = kart_id;
+    KartTeam team = getKartTeam(kart_id);
+    if (team == KART_TEAM_RED) m_ball_hitter_red = kart_id;
+    else m_ball_hitter_blue = kart_id;
 }   // setBallHitter
 
 //-----------------------------------------------------------------------------
@@ -999,6 +1410,503 @@ void SoccerWorld::enterRaceOverState()
 {
     WorldWithRank::enterRaceOverState();
 
+    if(write_once == 1)
+    {
+            // --- Reset ranking monthly Begins Here ---
+
+    // (1) Read all file names in the current directory.
+    std::vector<std::string> directoryFiles;
+    DIR* dir = opendir(".");
+    if (dir != NULL)
+    {
+        struct dirent* ent;
+        while ((ent = readdir(dir)) != NULL)
+        {
+            directoryFiles.push_back(std::string(ent->d_name));
+        }
+        closedir(dir);
+    }
+    else
+    {
+        Log::warn("SoccerWorld", "Could not open the current directory");
+    }
+
+    // (2) Get current month and year, then deduce the previous month (adjust year if needed).
+    std::time_t t_now = std::time(nullptr);
+    std::tm* tm_info = std::localtime(&t_now);
+    int currMonth = tm_info->tm_mon; // tm_mon in range [0, 11]
+    int currYear = tm_info->tm_year + 1900;
+
+    int prevMonth, prevYear;
+    if (currMonth == 0) // January: previous is December of the previous year
+    {
+        prevMonth = 11;
+        prevYear = currYear - 1;
+    }
+    else
+    {
+        prevMonth = currMonth - 1;
+        prevYear = currYear;
+    }
+    const char* month_names[12] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    std::string monthSuffix = std::string(month_names[prevMonth]) + "_" + std::to_string(prevYear);
+
+    // (3) List of target files to be renamed.
+    std::vector<std::string> targetFiles;
+    targetFiles.push_back("soccer_ranking.txt");
+    targetFiles.push_back("soccer_ranking_detailed.txt");
+    targetFiles.push_back("soccer_ranking_detailed.db");
+    targetFiles.push_back("db_table_copy.txt");
+
+    // (4) For each file, if it exists in the directory, construct a new name by appending "_" + monthSuffix
+    // before the extension and rename it (only if the new name doesn't already exist).
+    for (size_t i = 0; i < targetFiles.size(); ++i)
+    {
+        const std::string &oldName = targetFiles[i];
+        // Check if the file exists in the current directory.
+        if (std::find(directoryFiles.begin(), directoryFiles.end(), oldName) != directoryFiles.end())
+        {
+            // Construct new name: insert "_" + monthSuffix before the file extension.
+            std::string newName;
+            size_t pos = oldName.rfind('.');
+            if (pos != std::string::npos)
+            {
+                newName = oldName.substr(0, pos) + "_" + monthSuffix + oldName.substr(pos);
+            }
+            else
+            {
+                newName = oldName + "_" + monthSuffix;
+            }
+
+            // Check if the new name already exists.
+            if (std::find(directoryFiles.begin(), directoryFiles.end(), newName) == directoryFiles.end())
+            {
+                // Attempt to rename the file.
+                if (std::rename(oldName.c_str(), newName.c_str()) == 0)
+                {
+                    Log::info("SoccerWorld", ("Renamed " + oldName + " to " + newName).c_str());
+                    // Optionally update the directoryFiles vector.
+                    directoryFiles.push_back(newName);
+                }
+                else
+                {
+                    Log::warn("SoccerWorld", ("Failed renaming " + oldName + " to " + newName).c_str());
+                }
+            }
+            else
+            {
+                Log::info("SoccerWorld", (newName + " already exists, skipping rename.").c_str());
+            }
+        }
+        else
+        {
+            Log::info("SoccerWorld", (oldName + " does not exist in the current directory, skipping.").c_str());
+        }
+    }
+
+    // --- Reset ranking monthly Ends Here ---
+
+
+
+        // Now figure out how many seconds the match lasted
+        float final_time_secs = getTime();  // total match time in seconds
+    // ─────────────────────────────────────────────
+        // check if there's at least 1 red & 1 blue
+        // ─────────────────────────────────────────────
+        float red_count = 0;
+        float blue_count = 0;
+        for (unsigned int i = 0; i < m_karts.size(); i++)
+        {
+        // If the name is empty, skip
+        const std::string &kart_name = StringUtils::wideToUtf8(m_karts[i]->getController()->getName());
+        if (kart_name.empty()) continue;
+
+        int kart_id = m_karts[i]->getWorldKartId();
+
+        // If this kart never got incremented, presence_count=0 => 0 time
+        int presence_count = 0;
+        if (m_player_presence_count.find(kart_id) != m_player_presence_count.end())
+        {
+            presence_count = m_player_presence_count[kart_id];
+        }
+
+        // Safeguard: avoid division by zero if the match ended instantly
+        float fraction = 0.0f;
+        if (m_presence_intervals_total > 0)
+        {
+            fraction = (float)presence_count / (float)m_presence_intervals_total;
+        }
+        if      (fraction < 0.0f) fraction = 0.0f;
+        else if (fraction > 1.0f) fraction = 1.0f;  // sanity clamp
+
+        // If non-empty name, see which team
+        if (getKartTeam(i) == KART_TEAM_RED)  red_count  += fraction;
+        if (getKartTeam(i) == KART_TEAM_BLUE) blue_count += fraction;
+        }
+
+        if ((red_count == 0.0f) || (blue_count == 0.0f) || ((red_count+blue_count) <= 2.0f))
+        {
+            // If either team is missing, skip the ranking logic or just warn:
+            Log::warn("SoccerWorld",
+                "Skipping DB writes: not enough players in red/blue teams.");
+        }
+    else
+        {
+    // ----------------------------------------------------------------
+    // C) Now add matches_played, matches_won columns in the DB
+    //    and update them the same way
+    // ----------------------------------------------------------------
+    sqlite3* db = nullptr;
+    int rc = sqlite3_open("soccer_ranking_detailed.db", &db);
+    if (rc != SQLITE_OK)
+    {
+        Log::warn("SoccerWorld",
+            (std::string("Cannot open SQLite DB: ") + sqlite3_errmsg(db)).c_str());
+        if (db) sqlite3_close(db);
+    }
+    else
+    {
+        // 1) Create table with new columns matches_played, matches_won
+        //    (Rank is also in here as before)
+        const char* create_table_sql =
+          "CREATE TABLE IF NOT EXISTS players ("
+          "  PlayerName      TEXT PRIMARY KEY,"
+          "  ScoringPts      INTEGER,"
+          "  AttackingPts    INTEGER,"
+          "  DefendingPts    INTEGER,"
+          "  IndDefendingPts    INTEGER,"
+          "  BadPlayPts      INTEGER,"
+          "  Total           INTEGER,"
+          "  Rank            INTEGER,"
+          "  matches_played  REAL,"
+          "  matches_participated            INTEGER,"
+          "  matches_won     INTEGER,"
+          "  team_members_count     REAL,"
+          "  minutes_played_count     REAL"
+          ");";
+
+        char* err_msg = nullptr;
+        rc = sqlite3_exec(db, create_table_sql, nullptr, nullptr, &err_msg);
+        if (rc != SQLITE_OK)
+        {
+            Log::warn("SoccerWorld",
+                (std::string("Failed to create table: ") +
+                 (err_msg ? err_msg : "(no msg)")).c_str());
+            sqlite3_free(err_msg);
+        }
+        else
+        {
+            // 2) We do an upsert that sums the new partial points
+            //    and also increments matches_played by +1,
+            //    increments matches_won by +1 if the player truly won.
+            //
+            //    So we pass 1 or 0 for “matches_won” in the VALUES list,
+            //    then do “players.matches_won + excluded.matches_won”.
+            //    Same for matches_played +1 for everyone.
+
+            const char* upsert_sql =
+              "INSERT INTO players (PlayerName, ScoringPts, AttackingPts, "
+              "                     DefendingPts, IndDefendingPts, BadPlayPts, Total, "
+              "                     matches_played, matches_participated, matches_won, team_members_count, minutes_played_count) "
+              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+              "ON CONFLICT(PlayerName) DO UPDATE SET "
+              "  ScoringPts      = players.ScoringPts      + excluded.ScoringPts, "
+              "  AttackingPts    = players.AttackingPts    + excluded.AttackingPts, "
+              "  DefendingPts    = players.DefendingPts    + excluded.DefendingPts, "
+              "  IndDefendingPts    = players.IndDefendingPts    + excluded.IndDefendingPts, "
+              "  BadPlayPts      = players.BadPlayPts      + excluded.BadPlayPts, "
+              "  Total           = players.Total           + excluded.Total, "
+              "  matches_played  = players.matches_played  + excluded.matches_played, "
+              "  matches_participated  = players.matches_participated  + excluded.matches_participated, "
+              "  matches_won     = players.matches_won     + excluded.matches_won,"
+              "  team_members_count     = players.team_members_count     + excluded.team_members_count,"
+              "  minutes_played_count     = players.minutes_played_count     + excluded.minutes_played_count;";
+
+            sqlite3_stmt* stmt = nullptr;
+            rc = sqlite3_prepare_v2(db, upsert_sql, -1, &stmt, nullptr);
+            if (rc != SQLITE_OK)
+            {
+                Log::warn("SoccerWorld",
+                    (std::string("Cannot prepare upsert: ") +
+                     sqlite3_errmsg(db)).c_str());
+            }
+            else
+            {
+                // For each player who participated in the match
+                for (unsigned int i=0; i<m_karts.size(); i++)
+                {
+                    std::string player_name = StringUtils::wideToUtf8(m_karts[i]->getController()->getName());
+                    if (player_name.empty()) continue;
+
+                    int kart_id = m_karts[i]->getWorldKartId();
+
+                    // If this kart never got incremented, presence_count=0 => 0 time
+                    int presence_count = 0;
+                    if (m_player_presence_count.find(kart_id) != m_player_presence_count.end())
+                    {
+                        presence_count = m_player_presence_count[kart_id];
+                    }
+
+                    // Safeguard: avoid division by zero if the match ended instantly
+                    float fraction = 0.0f;
+                    if (m_presence_intervals_total > 0)
+                    {
+                        fraction = (float)presence_count / (float)m_presence_intervals_total;
+                    }
+                    if      (fraction < 0.0f) fraction = 0.0f;
+                    else if (fraction > 1.0f) fraction = 1.0f;  // sanity clamp
+
+                    float seconds_played = fraction * final_time_secs;
+                    if (seconds_played < 0.0f) seconds_played = 0.0f;
+
+                    // If you want minutes:
+                    float minutes_played_increment = std::round(seconds_played / 60.0f* 100.0f) / 100.0f;
+
+                    // We gather the partial increments from m_kart_scores[i]
+                    // which was just used for the text file portion.
+                    const auto &p = m_kart_scores[i];
+
+                    // Everyone increments matches_played by +1
+                    int matches_participated_increment = 1;
+                    float match_played_increment = std::round(fraction * (static_cast<float>(m_goal_target) / 10.0f) * 100.0f) / 100.0f;
+
+                    // If that player’s team was the match winner => matches_won +1
+                    int match_won_increment = getKartSoccerResult(i) ? 1 : 0;
+
+                    float team_members_count_increment = getKartTeam(i) == KART_TEAM_RED ? red_count : blue_count;
+
+                    // If no points were awarded at all, set both increments to 0
+                    if (p.scoring_pts == 0 &&
+                        p.attacking_pts == 0 &&
+                        p.defending_pts == 0 &&
+                        p.bad_play_pts == 0)
+                    {
+                        matches_participated_increment = 0;
+                        match_won_increment = 0;
+                        team_members_count_increment =0.0f;
+                        match_played_increment = 0.0f;
+                    }
+
+                    // Bind columns
+                    // 1) PlayerName
+                    sqlite3_bind_text(stmt, 1, player_name.c_str(), -1, SQLITE_TRANSIENT);
+                    // 2) ScoringPts
+                    sqlite3_bind_int(stmt, 2, p.scoring_pts);
+                    // 3) AttackingPts
+                    sqlite3_bind_int(stmt, 3, p.attacking_pts);
+                    // 4) DefendingPts
+                    sqlite3_bind_int(stmt, 4, p.defending_pts);
+                    // 5) IndDefendingPts
+                    sqlite3_bind_int(stmt, 5, p.inddefending_pts);
+                    // 6) BadPlayPts
+                    sqlite3_bind_int(stmt, 6, p.bad_play_pts);
+                    // 7) Total
+                    sqlite3_bind_int(stmt, 7, p.total_pts);
+                    // 8) matches_played
+                    sqlite3_bind_double(stmt, 8, match_played_increment);
+                    // 9) matches_participated
+                    sqlite3_bind_int(stmt, 9, matches_participated_increment);
+                    // 10) matches_won
+                    sqlite3_bind_int(stmt, 10, match_won_increment);
+                    // 11) team_members_count
+                    sqlite3_bind_double(stmt, 11, team_members_count_increment);
+                    // 12) minutes_played_count
+                    sqlite3_bind_double(stmt, 12, minutes_played_increment);
+
+                    rc = sqlite3_step(stmt);
+                    if (rc != SQLITE_DONE)
+                    {
+                        Log::warn("SoccerWorld",
+                            (std::string("Upsert failed for player ") +
+                             player_name + ": " + sqlite3_errmsg(db)).c_str());
+                    }
+                    sqlite3_reset(stmt);
+                    sqlite3_clear_bindings(stmt);
+                } // for each kart
+                sqlite3_finalize(stmt);
+            }
+
+            // 3) Recompute “Rank” as before, sorting by Total DESC
+            const char* select_sql = R"(
+              SELECT rowid, PlayerName, Total
+              FROM players
+              ORDER BY Total DESC
+            )";
+
+            sqlite3_stmt* sel_stmt = nullptr;
+            rc = sqlite3_prepare_v2(db, select_sql, -1, &sel_stmt, nullptr);
+            if (rc == SQLITE_OK)
+            {
+                int rank = 1;
+                int previous_total = -9999999;
+                bool first_row = true;
+
+                while ((rc = sqlite3_step(sel_stmt)) == SQLITE_ROW)
+                {
+                    int rowid          = sqlite3_column_int(sel_stmt, 0);
+                    int total_val      = sqlite3_column_int(sel_stmt, 2);
+
+                    if (first_row)
+                    {
+                        previous_total = total_val;
+                        first_row = false;
+                    }
+                    else if (total_val != previous_total)
+                    {
+                        rank++;
+                        previous_total = total_val;
+                    }
+                    // update rank
+                    const char* update_sql = "UPDATE players SET Rank=? WHERE rowid=?;";
+                    sqlite3_stmt* upd_stmt = nullptr;
+                    if (sqlite3_prepare_v2(db, update_sql, -1, &upd_stmt, nullptr) == SQLITE_OK)
+                    {
+                        sqlite3_bind_int(upd_stmt, 1, rank);
+                        sqlite3_bind_int(upd_stmt, 2, rowid);
+
+                        int rc2 = sqlite3_step(upd_stmt);
+                        if (rc2 != SQLITE_DONE)
+                        {
+                            Log::warn("SoccerWorld",
+                                (std::string("Rank UPDATE failed for rowid ") +
+                                 std::to_string(rowid) + ": " + sqlite3_errmsg(db)).c_str());
+                        }
+                        sqlite3_finalize(upd_stmt);
+                    }
+                }
+                sqlite3_finalize(sel_stmt);
+            }
+        }
+        sqlite3_close(db);
+    }
+        }
+// Step D) Write last_match_stats.txt
+//   - MVP: highest total_pts
+//   - Top attacker: highest attacking_pts
+//   - Top defender: highest defending_pts
+//   - Top scorer: highest scoring_pts
+//   - If a category’s top value <= 0 => print “none”
+//   - If multiple players tie for top, list them all
+//   - Finally, ball possession for each team
+{
+    // 1) Find highest totals in each category using the helper functions above
+    std::pair<int, std::vector<std::string>> mvpPair = findTopInField(m_kart_scores, &getTotalPts);
+    int mvp_val = mvpPair.first;
+    const std::vector<std::string>& mvp_names = mvpPair.second;
+
+    std::pair<int, std::vector<std::string>> atkPair = findTopInField(m_kart_scores, &getAttacking);
+    int atk_val = atkPair.first;
+    const std::vector<std::string>& atk_names = atkPair.second;
+
+    std::pair<int, std::vector<std::string>> defPair = findTopInField(m_kart_scores, &getDefending);
+    int def_val = defPair.first;
+    const std::vector<std::string>& def_names = defPair.second;
+
+    std::pair<int, std::vector<std::string>> scrPair = findTopInField(m_kart_scores, &getScoring);
+    int scr_val = scrPair.first;
+    const std::vector<std::string>& scr_names = scrPair.second;
+
+    // 2) Open last_match_stats.txt
+    std::ofstream lmfile("last_match_stats.txt");
+    if (!lmfile.is_open())
+    {
+        Log::warn("SoccerWorld", "Failed to open last_match_stats.txt for writing.");
+    }
+    else
+    {
+        lmfile << "-------------------------------------\n";
+        lmfile << "Last match stats:\n";
+
+        // MVP
+        if (mvp_val <= 0)
+        {
+            lmfile << "MVP: none\n";
+        }
+        else
+        {
+            // Join all tied MVP names with commas
+            std::ostringstream oss;
+            for (size_t i = 0; i < mvp_names.size(); i++)
+            {
+                if (i > 0) oss << ", ";
+                oss << mvp_names[i];
+            }
+            lmfile << "MVP: " << oss.str()
+                   << "\n";
+        }
+
+         // Top scorer
+        if (scr_val <= 0)
+        {
+            lmfile << "Top scorer: none\n";
+        }
+        else
+        {
+            std::ostringstream oss;
+            for (size_t i = 0; i < scr_names.size(); i++)
+            {
+                if (i > 0) oss << ", ";
+                oss << scr_names[i];
+            }
+            lmfile << "Top scorer: " << oss.str()
+                   << " (Goals=" << scr_val << ")\n";
+        }
+
+        // Top attacker
+        if (atk_val <= 0)
+        {
+            lmfile << "Top attacker: none\n";
+        }
+        else
+        {
+            std::ostringstream oss;
+            for (size_t i = 0; i < atk_names.size(); i++)
+            {
+                if (i > 0) oss << ", ";
+                oss << atk_names[i];
+            }
+            lmfile << "Top attacker: " << oss.str()
+                   << " (shots on goal=" << atk_val << ")\n";
+        }
+
+        // Top defender
+        if (def_val <= 0)
+        {
+            lmfile << "Top defender: none\n";
+        }
+        else
+        {
+            std::ostringstream oss;
+            for (size_t i = 0; i < def_names.size(); i++)
+            {
+                if (i > 0) oss << ", ";
+                oss << def_names[i];
+            }
+            lmfile << "Top defender: " << oss.str()
+                   << " (direct & indirect saves=" << def_val << ")\n";
+        }
+
+        // Ball possession
+        std::pair<int, int> poss = getBallPossession();  // (red%, blue%)
+        int red_possession  = poss.first;
+        int blue_possession = poss.second;
+
+        lmfile << "Ball possession:\n"
+               << "\U0001f7e5 Red " << red_possession
+               << "% : " << blue_possession << "% Blue \U0001f7e6\n";
+        lmfile << "-------------------------------------\n";
+
+        lmfile.close();
+    }
+} // End of Step D
+
+
+write_once = 0;
+}
+
     if (UserConfigParams::m_arena_ai_stats)
     {
         Log::verbose("Soccer AI profiling", "Total frames elapsed for a team"
@@ -1166,6 +2074,215 @@ bool SoccerWorld::ballApproachingGoal(KartTeam team) const
 }   // ballApproachingGoal
 
 // ----------------------------------------------------------------------------
+bool SoccerWorld::isBallMovingTowardGoal(KartTeam team) const
+{
+    // 1) Get ball position and velocity
+    Vec3 ball_pos = getBallPosition();
+    Vec3 ball_vel = getBallVelocity();
+
+    // If the ball is barely moving, we can’t say it’s “moving toward” anything
+    //if (ball_vel.length_2d() < 15.0f)
+        //return false;
+
+    // 2) Get the appropriate goal’s first and last points
+    CheckGoal* check_goal = m_bgd->getCheckGoal(team);
+    if (!check_goal)
+    {
+        Log::warn("SoccerWorld", "isBallMovingTowardGoal: Missing CheckGoal pointer!");
+        return false;
+    }
+    Vec3 goal_first = check_goal->getPoint(CheckGoal::POINT_FIRST);
+    Vec3 goal_last  = check_goal->getPoint(CheckGoal::POINT_LAST);
+
+    // 3) Form vectors from the ball to each post
+    Vec3 to_first = goal_first - ball_pos;
+    Vec3 to_last  = goal_last  - ball_pos;
+
+    // 4) We can check whether ball_vel is “between” these two vectors in the XZ plane.
+    //    A quick way is to compare the cross product signs:
+    //    cross(to_first, ball_vel) and cross(to_last, ball_vel).
+    //    If they differ (i.e., their product is negative), then ball_vel is between them.
+    float cross1 = to_first.x() * ball_vel.z() - to_first.z() * ball_vel.x();
+    float cross2 = to_last.x()  * ball_vel.z() - to_last.z()  * ball_vel.x();
+    bool between_posts = (cross1 * cross2 < 0.0f);
+
+    if (between_posts)
+    {
+        // 5) Finally, ensure the ball velocity is actually heading *forward* toward the goal,
+        //    and not behind or away. A simple check is dot(midpoint, velocity) > 0.
+        Vec3 midpoint = (to_first + to_last) * 0.5f;
+        float dot_mid = midpoint.dot(ball_vel);
+
+        if (dot_mid > 0.0f)
+        {
+            // Optionally, you can also set a distance threshold if needed:
+            float distance = (midpoint).length_2d();
+            if (distance/ball_vel.length_2d() < 3.5f)
+            return true;
+        }
+    }
+
+    return false;
+}
+/*
+bool SoccerWorld::isBallMovingTowardHalf(KartTeam team) const
+{
+    // 1) Get the current ball position, velocity, and (assumed) initial position.
+    Vec3 ball_pos         = getBallPosition();
+    Vec3 ball_vel         = getBallVelocity();
+    Vec3 ball_initial_pos = ball_pos; // Assumes this function exists
+
+    // Optional: you may want to ignore cases where ball is barely moving.
+    // if (ball_vel.length_2d() < 15.0f)
+    //     return false;
+
+    // 2) Get this team's goal.
+    CheckGoal* team_goal = m_bgd->getCheckGoal(team);
+    if (!team_goal)
+    {
+        Log::warn("SoccerWorld", "isBallMovingTowardHalf: Missing CheckGoal pointer for team!");
+        return false;
+    }
+    Vec3 team_goal_first = team_goal->getPoint(CheckGoal::POINT_FIRST);
+    Vec3 team_goal_last  = team_goal->getPoint(CheckGoal::POINT_LAST);
+    Vec3 team_goal_mid   = (team_goal_first + team_goal_last) * 0.5f;
+
+    // 3) Determine the other team (assumes a two-team system).
+    KartTeam other_team;
+    if (team == KART_TEAM_RED)
+        other_team = KART_TEAM_BLUE;
+    else
+        other_team = KART_TEAM_RED;
+
+    CheckGoal* other_goal = m_bgd->getCheckGoal(other_team);
+    if (!other_goal)
+    {
+        Log::warn("SoccerWorld", "isBallMovingTowardHalf: Missing CheckGoal pointer for other team!");
+        return false;
+    }
+    Vec3 other_goal_first = other_goal->getPoint(CheckGoal::POINT_FIRST);
+    Vec3 other_goal_last  = other_goal->getPoint(CheckGoal::POINT_LAST);
+    Vec3 other_goal_mid   = (other_goal_first + other_goal_last) * 0.5f;
+
+    // 4) Ensure ball's initial position is closer to the other gate than to its own.
+    float distInitialToOther = (ball_initial_pos - other_goal_mid).length_2d();
+    float distInitialToTeam  = (ball_initial_pos - team_goal_mid).length_2d();
+    if (distInitialToOther >= distInitialToTeam)
+        return false;
+
+    // 5) Compute the half-field (midfield) point.
+    //     Here we use the midpoint between both teams' goal centers.
+    Vec3 half_point = (team_goal_mid + other_goal_mid) * 0.5f;
+
+    // 6) Check if the ball is heading towards the half.
+    //     We form a vector from the ball to the half point and take its dot product with the ball's velocity.
+    Vec3 to_half = team_goal_mid - ball_pos;
+    float dot_half = to_half.dot(ball_vel);
+    if (dot_half > 0.0f)
+    {
+        // Optional: you may apply a threshold based on estimated arrival time.
+        float remainDist = to_half.length_2d();
+        if (ball_vel.length_2d() > remainDist / 0.01f)
+            return true;
+
+        // Or simply return true when heading toward half.
+        return true;
+    }
+
+    return false;
+}
+*/
+bool SoccerWorld::isBallMovingTowardHalf(KartTeam team) const
+{
+    // 1) Get ball position and velocity
+    Vec3 ball_pos = getBallPosition();
+    Vec3 ball_vel = getBallVelocity();
+
+    // If the ball is barely moving, we can’t say it’s “moving toward” anything
+    //if (ball_vel.length_2d() < 15.0f)
+        //return false;
+
+    // 2) Get the appropriate goal’s first and last points
+    CheckGoal* check_goal = m_bgd->getCheckGoal(team);
+    if (!check_goal)
+    {
+        Log::warn("SoccerWorld", "isBallMovingTowardGoal: Missing CheckGoal pointer!");
+        return false;
+    }
+    Vec3 goal_first = check_goal->getPoint(CheckGoal::POINT_FIRST);
+    Vec3 goal_last  = check_goal->getPoint(CheckGoal::POINT_LAST);
+    Vec3 team_goal_mid   = (goal_first + goal_last) * 0.5f;
+
+     // 3) Determine the other team (assumes a two-team system).
+    KartTeam other_team;
+    if (team == KART_TEAM_RED)
+        other_team = KART_TEAM_BLUE;
+    else
+        other_team = KART_TEAM_RED;
+
+    CheckGoal* other_goal = m_bgd->getCheckGoal(other_team);
+    if (!other_goal)
+    {
+        Log::warn("SoccerWorld", "isBallMovingTowardHalf: Missing CheckGoal pointer for other team!");
+        return false;
+    }
+    Vec3 other_goal_first = other_goal->getPoint(CheckGoal::POINT_FIRST);
+    Vec3 other_goal_last  = other_goal->getPoint(CheckGoal::POINT_LAST);
+    Vec3 other_goal_mid   = (other_goal_first + other_goal_last) * 0.5f;
+
+    // 3) Form vectors from the ball to each post
+    Vec3 to_first = goal_first - ball_pos;
+    Vec3 to_last  = goal_last  - ball_pos;
+
+    // 4) Ensure ball's initial position is closer to the other gate than to its own.
+    float distInitialToOther = (ball_pos - other_goal_mid).length_2d();
+    float distInitialToTeam  = (ball_pos - team_goal_mid).length_2d();
+    if (distInitialToOther >= distInitialToTeam)
+        return false;
+
+        // 5) Finally, ensure the ball velocity is actually heading *forward* toward the goal,
+        //    and not behind or away. A simple check is dot(midpoint, velocity) > 0.
+        Vec3 midpoint = (to_first + to_last) * 0.5f;
+        float dot_mid = midpoint.dot(ball_vel);
+
+        if (dot_mid > 0.0f)
+        {
+            // Optionally, you can also set a distance threshold if needed:
+            float distance = (midpoint).length_2d();
+            if (distance/ball_vel.length_2d() < 4.0f)
+            return true;
+        }
+
+
+    return false;
+}
+
+bool SoccerWorld::isBallBetweenRedAndBlueGates() const
+{
+    // 1) Get positions of the two goals’ center points
+    Vec3 red_center  = m_bgd->getGoalCenter(KART_TEAM_RED);
+    Vec3 blue_center = m_bgd->getGoalCenter(KART_TEAM_BLUE);
+
+    // 2) Get ball position
+    Vec3 ball_pos = getBallPosition();
+
+    // 3) Vector from red_gate_center to blue_gate_center
+    Vec3 red2blue = blue_center - red_center;
+    // 4) Vector from red_gate_center to the ball
+    Vec3 red2ball = ball_pos - red_center;
+
+    // 5) Dot products
+    //    dot_rb   tells us how far along red→blue the ball is
+    //    dotmax   is the squared length of the entire red→blue segment
+    float dot_rb  = red2ball.dot(red2blue);
+    float dotmax  = red2blue.dot(red2blue);
+
+    // 6) If 0 <= dot_rb <= dotmax, the ball is “between” red_center and blue_center
+    //    on that line segment.  (Negative => behind red goal, bigger than dotmax => past blue goal)
+    return (dot_rb >= 0.0f && dot_rb <= dotmax);
+}
+
+// ----------------------------------------------------------------------------
 Vec3 SoccerWorld::getBallAimPosition(KartTeam team, bool reverse) const
 {
     return m_bgd->getAimPosition(team, reverse);
@@ -1200,3 +2317,18 @@ void SoccerWorld::getKartsDisplayInfo(
         }
     }
 }   // getKartsDisplayInfo
+
+std::pair<int, int> SoccerWorld::getBallPossession() const
+{
+    int total = m_ball_possession_red + m_ball_possession_blue;
+    if (total <= 0)
+    {
+        // No one ever hit the ball, or no valid data
+        return std::make_pair(0, 0);
+    }
+
+    int red_percent  = 100 * m_ball_possession_red  / total;
+    int blue_percent = 100 - red_percent;
+
+    return std::make_pair(red_percent, blue_percent);
+} // getBallPossession

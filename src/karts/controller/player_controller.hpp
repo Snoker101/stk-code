@@ -97,4 +97,6 @@ public:
 
 };   // class PlayerController
 
+void set_jump_limit(float value);
+
 #endif // HEADER_PLAYER_CONTROLLER_HPP
