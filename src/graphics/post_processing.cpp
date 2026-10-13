@@ -120,42 +120,6 @@ public:
     }   // render
 };   // Gaussian3VBlurShader
 
-#if !defined(USE_GLES2)
-// ============================================================================
-class ComputeGaussian6VBlurShader : public TextureShader<ComputeGaussian6VBlurShader, 1,
-                                                  core::vector2df,
-                                                  std::vector<float> >
-{
-public:
-    GLuint m_dest_tu;
-    ComputeGaussian6VBlurShader()
-    {
-        loadProgram(OBJECT, GL_COMPUTE_SHADER, "gaussian6v.comp");
-        m_dest_tu = 1;
-        assignUniforms("pixel", "weights");
-        assignSamplerNames(0, "source", ST_BILINEAR_CLAMPED_FILTERED);
-        assignTextureUnit(m_dest_tu, "dest");
-    }   // ComputeGaussian6VBlurShader
-};   // ComputeGaussian6VBlurShader
-
-// ============================================================================
-class ComputeGaussian6HBlurShader : public TextureShader<ComputeGaussian6HBlurShader, 1,
-                                                  core::vector2df,
-                                                  std::vector<float> >
-{
-public:
-    GLuint m_dest_tu;
-    ComputeGaussian6HBlurShader()
-    {
-        loadProgram(OBJECT, GL_COMPUTE_SHADER, "gaussian6h.comp");
-        m_dest_tu = 1;
-        assignUniforms("pixel", "weights");
-        assignSamplerNames(0, "source",  ST_BILINEAR_CLAMPED_FILTERED);
-        assignTextureUnit(m_dest_tu, "dest");
-    }   // ComputeGaussian6HBlurShader
-};   // ComputeGaussian6HBlurShader
-#endif
-
 // ============================================================================
 class Gaussian6HBlurShader : public TextureShader<Gaussian6HBlurShader, 1,
                                                  core::vector2df, float>
@@ -404,25 +368,27 @@ public:
 };   // ToneMapShader
 
 // ============================================================================
-class DepthOfFieldShader : public TextureShader<DepthOfFieldShader, 2>
+// The Shader template doesn't explicitly handles bool uniforms,
+// but it works out-of-the-box via int promotion.
+class DepthOfFieldShader : public TextureShader<DepthOfFieldShader, 2,
+                                                float, float, bool>
 {
 public:
     DepthOfFieldShader()
     {
         loadProgram(OBJECT, GL_VERTEX_SHADER, "screenquad.vert",
                             GL_FRAGMENT_SHADER, "dof.frag");
-
-        assignUniforms();
+        assignUniforms("focalDepth", "range", "blurForeground"); 
         assignSamplerNames(0, "tex", ST_BILINEAR_CLAMPED_FILTERED,
                            1, "dtex", ST_NEAREST_CLAMPED_FILTERED);
     }   // DepthOfFieldShader
     // ------------------------------------------------------------------------
-    void render(const FrameBuffer &framebuffer, GLuint color_texture, GLuint depth_stencil_texture)
+    void render(const FrameBuffer &framebuffer, GLuint color_texture, GLuint depth_stencil_texture,
+        float focalDepth, float extraRange, bool foregroundBlur)
     {
         framebuffer.bind();
         setTextureUnits(color_texture, depth_stencil_texture);
-        drawFullScreenEffect();
-
+        drawFullScreenEffect(focalDepth, extraRange, foregroundBlur);
     }   // render
 };   // DepthOfFieldShader
 
@@ -777,28 +743,6 @@ void PostProcessing::renderBloom(GLuint in)
 }   // renderBloom
 
 // ----------------------------------------------------------------------------
-static std::vector<float> getGaussianWeight(float sigma, size_t count)
-{
-    float g0, g1, g2, total;
-
-    std::vector<float> weights;
-    g0 = 1.f / (sqrtf(2.f * 3.14f) * sigma);
-    g1 = exp(-.5f / (sigma * sigma));
-    g2 = g1 * g1;
-    total = g0;
-    for (unsigned i = 0; i < count; i++)
-    {
-        weights.push_back(g0);
-        g0 *= g1;
-        g1 *= g2;
-        total += 2 * g0;
-    }
-    for (float &weight : weights)
-        weight /= total;
-    return weights;
-}   // getGaussianWeight
-
-// ----------------------------------------------------------------------------
 void PostProcessing::renderGaussian3Blur(const FrameBuffer &in_fbo,
                                          const FrameBuffer &auxiliary) const
 {
@@ -823,58 +767,18 @@ void PostProcessing::renderGaussian6Blur(const FrameBuffer &in_fbo,
 {
     assert(in_fbo.getWidth() == auxiliary.getWidth() &&
            in_fbo.getHeight() == auxiliary.getHeight());
-    float inv_width = 1.0f / in_fbo.getWidth();
-    float inv_height = 1.0f / in_fbo.getHeight();
 
-    if (!CVS->supportsComputeShadersFiltering())
-    {
-        auxiliary.bind();
-        glClear(GL_COLOR_BUFFER_BIT);
-        Gaussian6VBlurShader::getInstance()
-            ->render(in_fbo.getRTT()[0], in_fbo.getWidth(), in_fbo.getHeight(),
-                     sigma_v);
+    auxiliary.bind();
+    glClear(GL_COLOR_BUFFER_BIT);
+    Gaussian6VBlurShader::getInstance()
+        ->render(in_fbo.getRTT()[0], in_fbo.getWidth(), in_fbo.getHeight(),
+                 sigma_v);
 
-        in_fbo.bind();
-        glClear(GL_COLOR_BUFFER_BIT);
-        Gaussian6HBlurShader::getInstance()->setTextureUnits(auxiliary.getRTT()[0]);
-        Gaussian6HBlurShader::getInstance()->render(auxiliary, in_fbo.getWidth(),
-                                                   in_fbo.getHeight(), sigma_h);
-    }
-#if !defined(USE_GLES2)
-    else
-    {
-        const std::vector<float> &weightsV = getGaussianWeight(sigma_v, 7);
-        glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
-        ComputeGaussian6VBlurShader::getInstance()->use();
-        ComputeGaussian6VBlurShader::getInstance()
-            ->setTextureUnits(in_fbo.getRTT()[0]);
-        glBindSampler(ComputeGaussian6VBlurShader::getInstance()->m_dest_tu, 0);
-        glBindImageTexture(ComputeGaussian6VBlurShader::getInstance()->m_dest_tu,
-                            auxiliary.getRTT()[0], 0, false, 0,
-                            GL_WRITE_ONLY, GL_RGBA16F);
-        ComputeGaussian6VBlurShader::getInstance()
-            ->setUniforms(core::vector2df(inv_width, inv_height), weightsV);
-        glDispatchCompute((int)in_fbo.getWidth() / 8 + 1,
-                          (int)in_fbo.getHeight() / 8 + 1, 1);
-
-        const std::vector<float> &weightsH = getGaussianWeight(sigma_h, 7);
-        glMemoryBarrier(  GL_TEXTURE_FETCH_BARRIER_BIT
-                        | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-        ComputeGaussian6HBlurShader::getInstance()->use();
-        ComputeGaussian6HBlurShader::getInstance()
-                         ->setTextureUnits(auxiliary.getRTT()[0]);
-        glBindSampler(ComputeGaussian6HBlurShader::getInstance()->m_dest_tu, 0);
-        glBindImageTexture(ComputeGaussian6HBlurShader::getInstance()->m_dest_tu,
-                           in_fbo.getRTT()[0], 0, false, 0,
-                           GL_WRITE_ONLY, GL_RGBA16F);
-        ComputeGaussian6HBlurShader::getInstance()
-                ->setUniforms(core::vector2df(inv_width, inv_height), weightsH);
-        glDispatchCompute((int)in_fbo.getWidth() / 8 + 1,
-                          (int)in_fbo.getHeight() / 8 + 1, 1);
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-    }
-#endif
-
+    in_fbo.bind();
+    glClear(GL_COLOR_BUFFER_BIT);
+    Gaussian6HBlurShader::getInstance()->setTextureUnits(auxiliary.getRTT()[0]);
+    Gaussian6HBlurShader::getInstance()->render(auxiliary, in_fbo.getWidth(),
+                                                in_fbo.getHeight(), sigma_h);
 }   // renderGaussian6Blur
 
 // ----------------------------------------------------------------------------
@@ -1022,7 +926,10 @@ void PostProcessing::renderMotionBlur(const FrameBuffer &in_fbo,
 // ----------------------------------------------------------------------------
 void PostProcessing::renderDoF(const FrameBuffer &framebuffer, GLuint color_texture, GLuint depth_stencil_texture)
 {
-    DepthOfFieldShader::getInstance()->render(framebuffer, color_texture, depth_stencil_texture);
+    // TODO: make it possible to use different parameters for cutscenes,
+    //       and to tweak the values from some config file to avoid the need for recompilation
+    DepthOfFieldShader::getInstance()->render(framebuffer, color_texture, depth_stencil_texture,
+        72.0 /* focal depth */, 360.0 /* extra range until max blur */, false /* foreground blurring */);
 }   // renderDoF
 
 // ----------------------------------------------------------------------------
