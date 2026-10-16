@@ -1172,6 +1172,38 @@ void ServerLobby::handleChat(Event* event)
             }, chat);
             event->getPeer()->updateLastMessage();
         delete chat;
+
+        // Answer players asking how to jump, twice during a game so that it
+        // is not missed
+        std::string text = StringUtils::toLowerCase(
+            message_utf8.substr(prefix.size()));
+        // Only count words starting with the keyword, so "show" is not "how"
+        auto has_word = [&text](const std::string& word)
+        {
+            size_t pos = text.find(word);
+            while (pos != std::string::npos)
+            {
+                if (pos == 0 || text[pos - 1] == ' ')
+                    return true;
+                pos = text.find(word, pos + 1);
+            }
+            return false;
+        };
+        if (has_word("how") && has_word("jump") &&
+            text.find("not") == std::string::npos)
+        {
+            NetworkString* reply = getNetworkString(m_type);
+            reply->setSynchronous(true);
+            reply->addUInt8(LE_CHAT).encodeString16(
+                L"To jump, press nitro without gas near flying balls");
+            const int times = m_state.load() == RACING ? 2 : 1;
+            for (int i = 0; i < times; i++)
+            {
+                STKHost::get()->sendPacketToAllPeersWith(
+                    [](STKPeer* p) { return p->isValidated(); }, reply);
+            }
+            delete reply;
+        }
     }
 }   // handleChat
 
