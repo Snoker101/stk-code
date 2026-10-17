@@ -660,11 +660,25 @@ void ServerLobby::updateTracksForMode()
 
         // Create the file with sample tips
         std::ofstream new_file("tips.txt");
-        new_file << "Practice your drifting skills to get better at corners." << std::endl;
-        new_file << "Use nitro wisely, don't burn it all at once." << std::endl;
-        new_file << "Collect nitro bottles for a speed boost." << std::endl;
-        new_file << "Use bananas and other projectiles to slow down opponents." << std::endl;
-        new_file << "Pay attention to the mini-map to plan your route." << std::endl;
+        new_file << "Type /help to see all server commands." << std::endl;
+        new_file << "Type /mix before the match to vote for balanced teams." << std::endl;
+        new_file << "Type /rank [name] to check a player's ranking." << std::endl;
+        new_file << "Type /top to see the leaderboard." << std::endl;
+        new_file << "Play 8 matches and 30 minutes to get ranked." << std::endl;
+        new_file << "Rankings reset at the start of every month." << std::endl;
+        new_file << "Type /score for the live score." << std::endl;
+        new_file << "Type /poss for live ball possession." << std::endl;
+        new_file << "Type /stats to see stats from the last match." << std::endl;
+        new_file << "Type /new to see what's new on the server." << std::endl;
+        new_file << "Type /tip to read a new tip." << std::endl;
+        new_file << "Light karts are the best choice for soccer." << std::endl;
+        new_file << "Drift to charge up your nitro." << std::endl;
+        new_file << "You can pick up your team's bowlings from the ground." << std::endl;
+        new_file << "Always keep a bowling in your pocket." << std::endl;
+        new_file << "Nitro works while reversing too." << std::endl;
+        new_file << "To jump, press nitro without gas near a flying ball." << std::endl;
+        new_file << "Powerups triple for the weaker team when it is losing by much." << std::endl;
+        new_file << "Vote for your preferred kart position in the lobby." << std::endl;
         new_file.close();
 
         // Read the newly created file
@@ -6158,7 +6172,7 @@ else if ((argv[0] == "mix") || (argv[0] == "autoteams") || (argv[0] == "randomte
         for (size_t i = 0; i < ranked_players.size(); ++i)
             scores[i] = ranked_players[i].points;
 
-        // We will backtrack over all subset sizes 1..(n-1) to find
+        // We will backtrack over all subsets of half the players to find
         // the subset whose sum is as close as possible to total_sum/2.
         typedef std::vector<bool> BoolVec;
 
@@ -6245,16 +6259,15 @@ else if ((argv[0] == "mix") || (argv[0] == "autoteams") || (argv[0] == "randomte
         int best_diff = INT_MAX;
         BoolVec best_mask(n, false);
 
-        // Try subsets of *all* possible sizes from 1..(n-1).
-        // (If you allow empty teams, then start at 0 instead of 1.)
-        for (int required_count = 1; required_count < n; required_count++)
+        // Only try subsets of half the players (rounded down), so team
+        // sizes differ by at most one player
         {
             int cur_sum = 0;
             BoolVec cur_mask(n, false);
 
             backtrack(0,                  // current_index
                       0,                  // selected_count
-                      required_count,     // how many in this subset
+                      n / 2,              // how many in this subset
                       best_diff,
                       scores,
                       total_sum,
@@ -6626,7 +6639,7 @@ else if ((argv[0] == "changeteam") || (argv[0] == "ct"))
     if (!file.is_open()) // check if file is not found
     {
         std::ofstream new_file("help.txt"); // create new file
-        new_file << "Help content is currently unavialable. Ask the owner to add it."; // write content to file
+        new_file << "Help content is currently unavailable. Ask the owner to add it."; // write content to file
         new_file.close(); // close file
         file.open("help.txt"); // reopen file to read content
     }
@@ -6654,7 +6667,7 @@ else if (argv[0] == "alldata")
     if (!file.is_open()) // check if file is not found
     {
         std::ofstream new_file("db_table_copy.txt"); // create new file
-        new_file << "No data avialable"; // write content to file
+        new_file << "No data available"; // write content to file
         new_file.close(); // close file
         file.open("db_table_copy.txt"); // reopen file to read content
     }
@@ -6682,7 +6695,7 @@ else if (argv[0] == "stats")
     if (!file.is_open()) // check if file is not found
     {
         std::ofstream new_file("last_match_stats.txt"); // create new file
-        new_file << "No stats avialable"; // write content to file
+        new_file << "No stats available"; // write content to file
         new_file.close(); // close file
         file.open("last_match_stats.txt"); // reopen file to read content
     }
@@ -6710,7 +6723,7 @@ else if (argv[0] == "stats")
     if (!file.is_open()) // check if file is not found
     {
         std::ofstream new_file("new.txt"); // create new file
-        new_file << "new content is currently unavialable. Ask the owner to add it."; // write content to file
+        new_file << "new content is currently unavailable. Ask the owner to add it."; // write content to file
         new_file.close(); // close file
         file.open("new.txt"); // reopen file to read content
     }
@@ -6738,7 +6751,7 @@ else if (argv[0] == "stats")
     if (!file.is_open()) // check if file is not found
     {
         std::ofstream new_file("about.txt"); // create new file
-        new_file << "about content is currently unavialable. Ask the owner to add it."; // write content to file
+        new_file << "about content is currently unavailable. Ask the owner to add it."; // write content to file
         new_file.close(); // close file
         file.open("about.txt"); // reopen file to read content
     }
