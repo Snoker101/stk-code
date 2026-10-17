@@ -217,6 +217,7 @@ namespace ChatCommands
             argv[0] == "score" || argv[0] == "poss" || argv[0] == "bye" ||
             argv[0] == "changeteam" || argv[0] == "ct" ||
             argv[0] == "help" || argv[0] == "alldata" || argv[0] == "stats" ||
+            argv[0] == "allstats" ||
             argv[0] == "new" || argv[0] == "about" || argv[0] == "kick")
         {
             lobby->handleSnoccerCommand(cmd, peer);

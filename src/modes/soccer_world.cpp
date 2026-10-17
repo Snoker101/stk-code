@@ -81,7 +81,8 @@ namespace
     // These "getter" functions return whichever field we want.
     int getTotalPts   (const KartScore &k) { return k.total_pts;    }
     int getAttacking  (const KartScore &k) { return k.attacking_pts;}
-    int getDefending  (const KartScore &k) { return k.defending_pts + k.inddefending_pts;}
+    int getSaves      (const KartScore &k) { return k.defending_pts;  }
+    int getClearances (const KartScore &k) { return k.inddefending_pts;}
     int getScoring    (const KartScore &k) { return k.scoring_pts;  }
 
     // This function scans all `KartScore` objects, finds the maximum value
@@ -1793,7 +1794,8 @@ void SoccerWorld::enterRaceOverState()
 // Step D) Write last_match_stats.txt
 //   - MVP: highest total_pts
 //   - Top attacker: highest attacking_pts
-//   - Top defender: highest defending_pts
+//   - Top goalkeeper: highest defending_pts (direct saves)
+//   - Top defender: highest inddefending_pts (clearances)
 //   - Top scorer: highest scoring_pts
 //   - If a category’s top value <= 0 => print “none”
 //   - If multiple players tie for top, list them all
@@ -1808,7 +1810,11 @@ void SoccerWorld::enterRaceOverState()
     int atk_val = atkPair.first;
     const std::vector<std::string>& atk_names = atkPair.second;
 
-    std::pair<int, std::vector<std::string>> defPair = findTopInField(m_kart_scores, &getDefending);
+    std::pair<int, std::vector<std::string>> gkPair = findTopInField(m_kart_scores, &getSaves);
+    int gk_val = gkPair.first;
+    const std::vector<std::string>& gk_names = gkPair.second;
+
+    std::pair<int, std::vector<std::string>> defPair = findTopInField(m_kart_scores, &getClearances);
     int def_val = defPair.first;
     const std::vector<std::string>& def_names = defPair.second;
 
@@ -1893,7 +1899,24 @@ void SoccerWorld::enterRaceOverState()
                 oss << def_names[i];
             }
             lmfile << "Top defender: " << oss.str()
-                   << " (direct & indirect saves=" << def_val << ")\n";
+                   << " (clearances=" << def_val << ")\n";
+        }
+
+        // Top goalkeeper
+        if (gk_val <= 0)
+        {
+            lmfile << "Top goalkeeper: none\n";
+        }
+        else
+        {
+            std::ostringstream oss;
+            for (size_t i = 0; i < gk_names.size(); i++)
+            {
+                if (i > 0) oss << ", ";
+                oss << gk_names[i];
+            }
+            lmfile << "Top goalkeeper: " << oss.str()
+                   << " (saves=" << gk_val << ")\n";
         }
 
         // Ball possession
@@ -1909,6 +1932,46 @@ void SoccerWorld::enterRaceOverState()
         lmfile.close();
     }
 } // End of Step D
+
+// Step E) Write last_match_players.txt: every player of the match with
+// their own stats, from highest to lowest total points
+{
+    std::vector<unsigned int> order;
+    for (unsigned int i = 0; i < m_kart_scores.size(); i++)
+    {
+        if (!m_kart_scores[i].m_name.empty())
+            order.push_back(i);
+    }
+    std::stable_sort(order.begin(), order.end(),
+        [this](unsigned int a, unsigned int b)
+        {
+            return m_kart_scores[a].total_pts > m_kart_scores[b].total_pts;
+        });
+
+    std::ofstream pfile("last_match_players.txt");
+    if (!pfile.is_open())
+    {
+        Log::warn("SoccerWorld",
+            "Failed to open last_match_players.txt for writing.");
+    }
+    else
+    {
+        pfile << "Last match players:\n";
+        if (order.empty())
+            pfile << "No players\n";
+        for (unsigned int i : order)
+        {
+            const KartScore& ks = m_kart_scores[i];
+            pfile << (getKartTeam(i) == KART_TEAM_RED ?
+                "\U0001f7e5 " : "\U0001f7e6 ")
+                << ks.m_name << ": " << ks.total_pts << " pts (goals "
+                << ks.scoring_pts << ", shots " << ks.attacking_pts
+                << ", saves " << ks.defending_pts + ks.inddefending_pts
+                << ", mistakes " << -ks.bad_play_pts << ")\n";
+        }
+        pfile.close();
+    }
+} // End of Step E
 
 
 

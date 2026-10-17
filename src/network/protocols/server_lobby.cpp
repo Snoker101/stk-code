@@ -669,6 +669,7 @@ void ServerLobby::updateTracksForMode()
         new_file << "Type /score for the live score." << std::endl;
         new_file << "Type /poss for live ball possession." << std::endl;
         new_file << "Type /stats to see stats from the last match." << std::endl;
+        new_file << "Type /allstats to see every player's last match stats." << std::endl;
         new_file << "Type /new to see what's new on the server." << std::endl;
         new_file << "Type /tip to read a new tip." << std::endl;
         new_file << "Light karts are the best choice for soccer." << std::endl;
@@ -2641,6 +2642,18 @@ void ServerLobby::update(int ticks)
             back_to_lobby->addUInt8(LE_BACK_LOBBY).addUInt8(BLR_NONE);
             sendMessageToPeersInServer(back_to_lobby, /*reliable*/true);
             delete back_to_lobby;
+            // Show the stats of the match that just ended (same as /stats),
+            // written by SoccerWorld when the match ended
+            if (RaceManager::get()->isSoccerMode())
+            {
+                std::ifstream file("last_match_stats.txt");
+                if (file.is_open())
+                {
+                    std::stringstream buffer;
+                    buffer << file.rdbuf();
+                    send_message(buffer.str());
+                }
+            }
             m_rs_state.store(RS_ASYNC_RESET);
         }
         break;
@@ -6708,6 +6721,21 @@ else if (argv[0] == "stats")
 
     file.close(); // close the file
     delete chat;
+    return;
+    }
+
+    else if (argv[0] == "allstats")
+    {
+    // Stats of every player of the last match, written by SoccerWorld
+    std::ifstream file("last_match_players.txt");
+    if (!file.is_open())
+    {
+        send_private_message("No match stats available", peer);
+        return;
+    }
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    send_private_message(buffer.str(), peer);
     return;
     }
 
