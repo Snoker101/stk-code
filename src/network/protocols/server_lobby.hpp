@@ -132,6 +132,10 @@ private:
     /** Seconds left last shown in the lobby player list. */
     int m_position_vote_shown_secs;
 
+    /** True when a match ended normally, so resetServer shows its stats
+     *  after the server info. */
+    std::atomic_bool m_send_stats_after_reset;
+
     /** Start position (1 based) voted by each player, also read by
      *  updatePlayerList so it's guarded by the mutex. */
     std::mutex m_position_votes_mutex;

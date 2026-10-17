@@ -443,6 +443,7 @@ ServerLobby::ServerLobby() : LobbyProtocol()
     m_registered_for_once_only = false;
     m_position_vote_end = 0;
     m_position_vote_shown_secs = 0;
+    m_send_stats_after_reset = false;
     setHandleDisconnections(true);
     m_state = SET_PUBLIC_ADDRESS;
     m_save_server_config = true;
@@ -2642,18 +2643,9 @@ void ServerLobby::update(int ticks)
             back_to_lobby->addUInt8(LE_BACK_LOBBY).addUInt8(BLR_NONE);
             sendMessageToPeersInServer(back_to_lobby, /*reliable*/true);
             delete back_to_lobby;
-            // Show the stats of the match that just ended (same as /stats),
-            // written by SoccerWorld when the match ended
-            if (RaceManager::get()->isSoccerMode())
-            {
-                std::ifstream file("last_match_stats.txt");
-                if (file.is_open())
-                {
-                    std::stringstream buffer;
-                    buffer << file.rdbuf();
-                    send_message(buffer.str());
-                }
-            }
+            // Show the stats of the match that just ended once the server
+            // info is sent again in resetServer
+            m_send_stats_after_reset = RaceManager::get()->isSoccerMode();
             m_rs_state.store(RS_ASYNC_RESET);
         }
         break;
@@ -4962,6 +4954,18 @@ void ServerLobby::resetServer()
     m_game_setup->addServerInfo(server_info);
     sendMessageToPeersInServer(server_info);
     delete server_info;
+    // Stats of the match that just ended (same as /stats), written by
+    // SoccerWorld, shown below the server description
+    if (m_send_stats_after_reset.exchange(false))
+    {
+        std::ifstream file("last_match_stats.txt");
+        if (file.is_open())
+        {
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            send_message(buffer.str());
+        }
+    }
     setup();
     m_state = NetworkConfig::get()->isLAN() ?
         WAITING_FOR_START_GAME : REGISTER_SELF_ADDRESS;
