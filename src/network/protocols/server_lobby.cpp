@@ -1234,6 +1234,21 @@ bool ServerLobby::startPositionVote()
         ServerConfig::m_position_vote_time <= 0.0f)
         return false;
 
+    // Skip the vote if all players are spectators, startSelection will then
+    // keep waiting in the lobby
+    bool has_peer_plays_game = false;
+    for (auto& peer : STKHost::get()->getPeers())
+    {
+        if (peer->isValidated() && !peer->isWaitingForGame() &&
+            !peer->alwaysSpectate() && !peer->isAIPeer())
+        {
+            has_peer_plays_game = true;
+            break;
+        }
+    }
+    if (!has_peer_plays_game)
+        return false;
+
     {
         std::lock_guard<std::mutex> lock(m_position_votes_mutex);
         m_position_votes.clear();
