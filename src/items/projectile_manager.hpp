@@ -95,6 +95,9 @@ public:
     // ------------------------------------------------------------------------
     std::vector<Vec3> getBasketballPositions();
     // ------------------------------------------------------------------------
+    std::vector<std::shared_ptr<Flyable> >
+                      getProjectiles(PowerupManager::PowerupType type) const;
+    // ------------------------------------------------------------------------
     void addByUID(const std::string& uid, std::shared_ptr<Flyable> f)
                                              { m_active_projectiles[uid] = f; }
     // ------------------------------------------------------------------------

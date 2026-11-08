@@ -724,6 +724,7 @@ void MainLoop::run()
             if ((UserConfigParams::m_swap_interval == 0 ||
                 GUIEngine::isNoGraphics()) &&
                 m_throttle_fps && !ProfileWorld::isProfileMode() &&
+                !UserConfigParams::m_arena_ai_stats &&
                 current_fps > max_fps)
             {
                 double wait_time = 1.0 / max_fps - 1.0 / current_fps;

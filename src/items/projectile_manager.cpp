@@ -277,6 +277,23 @@ std::vector<Vec3> ProjectileManager::getBasketballPositions()
     return positions;
 } // getBasketballPositions
 // -----------------------------------------------------------------------------
+/** Returns all active projectiles of a type, for example for AIs to see
+ *  bowling balls coming.
+ *  \param type The type of the projectiles.
+ */
+std::vector<std::shared_ptr<Flyable> >
+    ProjectileManager::getProjectiles(PowerupManager::PowerupType type) const
+{
+    std::vector<std::shared_ptr<Flyable> > result;
+    for (auto& p : m_active_projectiles)
+    {
+        if (p.second->getType() == type && !p.second->hasHit())
+            result.push_back(p.second);
+    }
+    return result;
+}   // getProjectiles
+
+// -----------------------------------------------------------------------------
 std::string ProjectileManager::getUniqueIdentity(AbstractKart* kart,
                                                  PowerupManager::PowerupType t)
 {

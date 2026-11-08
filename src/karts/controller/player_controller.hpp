@@ -23,6 +23,8 @@
 
 class AbstractKart;
 class Player;
+class SoccerWorld;
+class Vec3;
 
 class PlayerController : public Controller
 {
@@ -95,6 +97,10 @@ public:
     /** Called when this kart started too early and got a start penalty. */
     virtual void  displayPenaltyWarning();
 
+    // ------------------------------------------------------------------------
+    static bool computeBallJumpVelocity(const AbstractKart* kart,
+                                        const SoccerWorld* soccer_world,
+                                        Vec3* velocity);
 };   // class PlayerController
 
 void set_jump_limit(float value);

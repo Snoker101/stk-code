@@ -83,6 +83,12 @@ protected:
      *  \param consider_difficulty If take current difficulty into account.
      *  \param find_sta If find \ref SpareTireAI only. */
     virtual void  findClosestKart(bool consider_difficulty, bool find_sta) = 0;
+    // ------------------------------------------------------------------------
+    /** Decide whether to fire the current powerup. */
+    virtual void  useItems(const float dt);
+    // ------------------------------------------------------------------------
+    /** If true, AI will use nitro for this frame. */
+    virtual bool  shouldUseNitro();
 
 private:
     /** Local coordinates of current target point. */
@@ -137,6 +143,8 @@ private:
     // ------------------------------------------------------------------------
     void          configSteering();
     // ------------------------------------------------------------------------
+    void          steerToTarget();
+    // ------------------------------------------------------------------------
     void          checkIfStuck(const float dt);
     // ------------------------------------------------------------------------
     void          determinePath(int forward, std::vector<int>* path);
@@ -148,8 +156,6 @@ private:
     bool          gettingUnstuck(int ticks);
     // ------------------------------------------------------------------------
     bool          updateAimingPosition(Vec3* target_point);
-    // ------------------------------------------------------------------------
-    void          useItems(const float dt);
     // ------------------------------------------------------------------------
     virtual bool  canSkid(float steer_fraction) OVERRIDE
                                                         { return m_mini_skid; }
@@ -172,6 +178,26 @@ private:
     // ------------------------------------------------------------------------
     /** If true, AI will stop moving. */
     virtual bool  isWaiting() const = 0;
+    // ------------------------------------------------------------------------
+    /** If true, AI won't accelerate, and being slow isn't considered stuck. */
+    virtual bool  holdPosition() const                        { return false; }
+    // ------------------------------------------------------------------------
+    /** If true, the AI is stuck against something and must back up. */
+    virtual bool  isBlocked() const                           { return false; }
+    // ------------------------------------------------------------------------
+    /** A kart will not brake when it's already slower than this. */
+    virtual float getMinBrakeSpeed() const                     { return 5.0f; }
+    // ------------------------------------------------------------------------
+    /** If true, AI driving directly to the target slows down for the turn. */
+    virtual bool  brakeForTurns() const                       { return false; }
+    // ------------------------------------------------------------------------
+    /** How long reversing to turn around can take in seconds. */
+    virtual float getMaxUTurnTime() const                      { return 1.5f; }
+    // ------------------------------------------------------------------------
+    /** Called when the target is behind the kart.
+     *  \param lc Target in the local coordinates of the kart.
+     *  \return True to reverse, false to turn around while driving forward. */
+    virtual bool  shouldReverseToTurn(const Vec3& lc) const    { return true; }
     // ------------------------------------------------------------------------
     /** If true, AI stays on the \ref ArenaNode correctly, otherwise
      *  \ref RescueAnimation will be done after sometime. */

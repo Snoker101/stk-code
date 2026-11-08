@@ -114,7 +114,10 @@ public:
     bool                     testAndSetKart(int kartid);
     void                     getRandomKartList(int count,
                                            RemoteKartInfoList* existing_karts,
-                                           std::vector<std::string> *ai_list);
+                                           std::vector<std::string> *ai_list,
+                                           const std::string& preferred_type = "",
+                                           const std::vector<std::string>& excluded =
+                                               std::vector<std::string>());
     void                     setHatMeshName(const std::string &hat_name);
     void                     setHatMeshName();
     // ------------------------------------------------------------------------

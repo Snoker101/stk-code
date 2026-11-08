@@ -29,6 +29,7 @@
 #include "karts/kart_model.hpp"
 #include "karts/kart_properties.hpp"
 #include "karts/controller/local_player_controller.hpp"
+#include "karts/controller/soccer_ai.hpp"
 #include "karts/controller/network_player_controller.hpp"
 #include "network/network_config.hpp"
 #include "network/network_string.hpp"
@@ -51,6 +52,7 @@
 #include "utils/string_utils.hpp"
 
 #include <IMeshSceneNode.h>
+#include <limits>
 #include <numeric>
 #include <string>
 #include <fstream>
@@ -449,6 +451,15 @@ void SoccerWorld::init()
 void SoccerWorld::reset(bool restart)
 {
     WorldWithRank::reset(restart);
+    m_log_frames.clear();
+    m_log_events.clear();
+    m_log_ticks = 0;
+    {
+        char stamp[32];
+        const time_t now = time(NULL);
+        strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", localtime(&now));
+        m_log_match = stamp;
+    }
     if (RaceManager::get()->hasTimeTarget())
     {
         WorldStatus::setClockMode(WorldStatus::CLOCK_COUNTDOWN,
@@ -465,6 +476,9 @@ void SoccerWorld::reset(bool restart)
     m_ball_hitter = -1;
     m_red_kdm.clear();
     m_blue_kdm.clear();
+    m_ai_roles.clear();
+    m_ai_striker[0] = m_ai_striker[1] = -1;
+    m_ai_keeper[0] = m_ai_keeper[1] = -1;
     m_ball_heading = 0.0f;
     m_ball_invalid_timer = 0;
     m_goal_transforms.clear();
@@ -556,6 +570,18 @@ void SoccerWorld::update(int ticks)
 
     WorldWithRank::update(ticks);
     WorldWithRank::updateTrack(ticks);
+
+    // 20 frames per second are enough to see what happened
+    if (m_goal_log && !NetworkConfig::get()->isNetworking() &&
+        !isGoalPhase() && !isStartPhase())
+    {
+        m_log_ticks += ticks;
+        if (m_log_ticks >= stk_config->time2Ticks(0.05f))
+        {
+            m_log_ticks = 0;
+            recordGoalLogFrame();
+        }
+    }
 
     if (isGoalPhase())
     {
@@ -824,6 +850,8 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         return;
     m_ticks_back_to_own_goal = getTicksSinceStart() +
         stk_config->time2Ticks(3.0f);
+    if (m_goal_log && !NetworkConfig::get()->isNetworking())
+        writeGoalLog(first_goal);
     m_goal_sound->play();
     m_ball->reset();
     m_ball->setEnabled(false);
@@ -950,52 +978,56 @@ void SoccerWorld::onCheckGoalTriggered(bool first_goal)
         m_goal_transforms[i] = kart->getBody()->getWorldTransform();
     }
 
-    if((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 4) && (powerup_multiplier_value() == 1) && (!isRaceOver()) && (once == 1))
+    // These are all about messages to server players, offline there's no lobby
+    if (sl)
     {
-        if (sl->losing_team_weaker())
+        if((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) == 4) && (powerup_multiplier_value() == 1) && (!isRaceOver()) && (once == 1))
+        {
+            if (sl->losing_team_weaker())
+            {
+            set_powerup_multiplier(3);
+                sl->send_message("Powerupper on (automatically)");
+                once =2;
+            }
+        }
+
+        if ((once == 2) && (powerup_multiplier_value() == 1) && (sl->losing_team_weaker()) && (!isRaceOver()))
         {
         set_powerup_multiplier(3);
             sl->send_message("Powerupper on (automatically)");
-            once =2;
         }
-    }
 
-    if ((once == 2) && (powerup_multiplier_value() == 1) && (sl->losing_team_weaker()) && (!isRaceOver()))
-    {
-    set_powerup_multiplier(3);
-        sl->send_message("Powerupper on (automatically)");
-    }
+        if ((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) != 0) && (powerup_multiplier_value() == 3) && (!sl->losing_team_weaker()) && (!isRaceOver()))
+        {
+        set_powerup_multiplier(1);
+            sl->send_message("Powerupper off (automatically)");
+        }
 
-    if ((abs(getScore(KART_TEAM_BLUE)-getScore(KART_TEAM_RED)) != 0) && (powerup_multiplier_value() == 3) && (!sl->losing_team_weaker()) && (!isRaceOver()))
-    {
-    set_powerup_multiplier(1);
-        sl->send_message("Powerupper off (automatically)");
-    }
+        if(getScore(KART_TEAM_BLUE) == 5 && once_blue_five == 1 )
+        {
+            auto poss = getBallPossession();
+            int red_possession  = poss.first;
+            int blue_possession = poss.second;
+            sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
 
-    if(getScore(KART_TEAM_BLUE) == 5 && once_blue_five == 1 )
-    {
-        auto poss = getBallPossession();
-        int red_possession  = poss.first;
-        int blue_possession = poss.second;
-        sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
+            once_blue_five = 2;
+        }
+        if(getScore(KART_TEAM_RED) == 5 && once_red_five == 1)
+        {
+            auto poss = getBallPossession();
+            int red_possession  = poss.first;
+            int blue_possession = poss.second;
+            sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
 
-        once_blue_five = 2;
-    }
-    if(getScore(KART_TEAM_RED) == 5 && once_red_five == 1)
-    {
-        auto poss = getBallPossession();
-        int red_possession  = poss.first;
-        int blue_possession = poss.second;
-        sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
-
-        once_red_five = 2;
-    }
-    if(isRaceOver())
-    {
-        auto poss = getBallPossession();
-        int red_possession  = poss.first;
-        int blue_possession = poss.second;
-        sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
+            once_red_five = 2;
+        }
+        if(isRaceOver())
+        {
+            auto poss = getBallPossession();
+            int red_possession  = poss.first;
+            int blue_possession = poss.second;
+            sl->send_message("Ball Possession:\n\U0001f7e5 Red " + std::to_string(red_possession)+ "% : " + std::to_string(blue_possession) + "% Blue \U0001f7e6");
+        }
     }
 
     m_ball_hitter_red = -1;
@@ -1120,6 +1152,10 @@ void SoccerWorld::handlePlayerGoalFromServer(const NetworkString& ns)
 //-----------------------------------------------------------------------------
 void SoccerWorld::resetKartsToSelfGoals()
 {
+    // Jobs are given again for the new kickoff, from where the karts are then
+    m_ai_striker[0] = m_ai_striker[1] = -1;
+    m_ai_keeper[0] = m_ai_keeper[1] = -1;
+
     m_ball->setEnabled(true);
     m_ball->reset();
     m_bgd->resetCheckGoal(Track::getCurrentTrack());
@@ -1144,11 +1180,202 @@ void SoccerWorld::resetKartsToSelfGoals()
 }   // resetKartsToSelfGoals
 
 //-----------------------------------------------------------------------------
+bool SoccerWorld::m_goal_log = false;
+
+//-----------------------------------------------------------------------------
+/** Time since the start of the match, also when the clock counts down.
+ */
+float SoccerWorld::getLogTime() const
+{
+    return stk_config->ticks2Time(getTicksSinceStart());
+}   // getLogTime
+
+//-----------------------------------------------------------------------------
+/** Adds an event like a jump of a kart to the goal log.
+ *  \param kart_id World id of the kart.
+ *  \param what What happened.
+ */
+void SoccerWorld::logEvent(int kart_id, const std::string& what)
+{
+    if (!m_goal_log)
+        return;
+    const float now = getLogTime();
+    // A kart touches the ball in many frames in a row, that's one touch
+    for (auto it = m_log_events.rbegin();
+         it != m_log_events.rend() && now - it->m_time < 0.3f; it++)
+    {
+        if (it->m_kart == kart_id && it->m_what == what)
+        {
+            it->m_time = now;
+            return;
+        }
+    }
+    m_log_events.push_back({ now, kart_id, what });
+    while (!m_log_events.empty() && now - m_log_events.front().m_time > 10.0f)
+        m_log_events.pop_front();
+}   // logEvent
+
+//-----------------------------------------------------------------------------
+/** Keeps the positions and controls of all karts and the ball, and what the
+ *  AIs are doing, for the last seconds.
+ */
+void SoccerWorld::recordGoalLogFrame()
+{
+    GoalLogFrame frame;
+    frame.m_time = getLogTime();
+    frame.m_ball = getBallPosition();
+    frame.m_ball_velocity = getBallVelocity();
+    for (unsigned int i = 0; i < m_karts.size(); i++)
+    {
+        const AbstractKart* kart = m_karts[i].get();
+        const KartControl& controls = kart->getControls();
+        GoalLogKart k;
+        k.m_xyz = kart->getXYZ();
+        k.m_velocity = kart->getVelocity();
+        k.m_heading = kart->getHeading();
+        k.m_speed = kart->getSpeed();
+        k.m_accel = controls.getAccel();
+        k.m_steer = controls.getSteer();
+        k.m_brake = controls.getBrake();
+        k.m_nitro = controls.getNitro();
+        k.m_skid = controls.getSkidControl() != KartControl::SC_NONE;
+        k.m_target = Vec3(0.0f);
+        const SoccerAI* ai =
+            dynamic_cast<const SoccerAI*>(kart->getController());
+        if (ai)
+        {
+            k.m_mode = ai->getDebugMode();
+            k.m_target = ai->getTargetPoint();
+        }
+        else if (kart->getController()->isPlayerController())
+            k.m_mode = "player";
+        if (kart->getKartAnimation())
+            k.m_mode += "(rescue/explosion)";
+        if (k.m_mode.empty())
+            k.m_mode = "-";
+        frame.m_karts.push_back(k);
+    }
+    m_log_frames.push_back(frame);
+    while (!m_log_frames.empty() &&
+           frame.m_time - m_log_frames.front().m_time > 10.0f)
+        m_log_frames.pop_front();
+}   // recordGoalLogFrame
+
+//-----------------------------------------------------------------------------
+/** Writes the last seconds before a goal to a file in the soccer_log folder
+ *  of the user config directory.
+ *  \param first_goal True if the ball went into the blue goal.
+ */
+void SoccerWorld::writeGoalLog(bool first_goal)
+{
+    const std::string dir = file_manager->getUserConfigDir() + "soccer_log/";
+    file_manager->checkAndCreateDirectory(dir);
+    const int number = (int)(m_red_scorers.size() + m_blue_scorers.size()) + 1;
+    const std::string path = dir + "goal_" + m_log_match + "_" +
+        std::to_string(number) + ".txt";
+    std::ofstream f(path.c_str());
+    if (!f.is_open())
+    {
+        Log::warn("SoccerWorld", "Can't write goal log %s", path.c_str());
+        return;
+    }
+
+    auto team_name = [](KartTeam t)
+    {
+        return t == KART_TEAM_RED ? "red" : "blue";
+    };
+    auto role_name = [](AIRole r)
+    {
+        switch (r)
+        {
+        case AI_ROLE_STRIKER:  return "striker";
+        case AI_ROLE_KEEPER:   return "keeper";
+        case AI_ROLE_SUPPORT:  return "support";
+        case AI_ROLE_ATTACKER: return "attacker";
+        default:               return "-";
+        }
+    };
+    auto kart_name = [this](int id)
+    {
+        return StringUtils::wideToUtf8(
+            m_karts[id]->getController()->getName());
+    };
+
+    char line[512];
+    f << "# Snoccer goal log: the last 10 s before the goal, 20 frames per "
+         "second\n";
+    f << "# x/z are the ground plane, y is height, heading in radians, times "
+         "in s since the match start\n";
+    snprintf(line, sizeof(line), "goal %d: into the %s goal (%s team scores) "
+        "at %.2f s, score before: red %d - blue %d, track %s\n", number,
+        first_goal ? "blue" : "red", first_goal ? "red" : "blue",
+        getLogTime(), (int)m_red_scorers.size(), (int)m_blue_scorers.size(),
+        Track::getCurrentTrack()->getIdent().c_str());
+    f << line;
+    if (m_ball_hitter != -1)
+    {
+        snprintf(line, sizeof(line), "last touch: k%d %s (%s team)\n",
+            m_ball_hitter, kart_name(m_ball_hitter).c_str(),
+            team_name(getKartTeam(m_ball_hitter)));
+        f << line;
+    }
+    for (KartTeam t : { KART_TEAM_RED, KART_TEAM_BLUE })
+    {
+        const Vec3 c = getGoalCenter(t);
+        snprintf(line, sizeof(line), "%s goal: center x=%.1f z=%.1f, half "
+            "width %.1f\n", team_name(t), c.x(), c.z(), getGoalHalfWidth(t));
+        f << line;
+    }
+    f << "karts:\n";
+    for (unsigned int i = 0; i < m_karts.size(); i++)
+    {
+        const bool human = m_karts[i]->getController()->isPlayerController();
+        snprintf(line, sizeof(line), "  k%u %s [%s] %s team, %s%s\n", i,
+            kart_name(i).c_str(), m_karts[i]->getIdent().c_str(),
+            team_name(getKartTeam(i)), human ? "human" : "AI ",
+            human ? "" : role_name(getAIRole(i)));
+        f << line;
+    }
+    f << "events:\n";
+    for (const GoalLogEvent& e : m_log_events)
+    {
+        snprintf(line, sizeof(line), "  t=%.2f %s k%d %s\n", e.m_time,
+            e.m_what.c_str(), e.m_kart, kart_name(e.m_kart).c_str());
+        f << line;
+    }
+    f << "frames: t, ball x y z, ball velocity x y z, then per kart:\n"
+         "  k x y z heading speed accel brake steer nitro skid mode "
+         "target_x target_z velocity_x velocity_y velocity_z\n";
+    for (const GoalLogFrame& fr : m_log_frames)
+    {
+        snprintf(line, sizeof(line), "t=%.2f ball %.1f %.1f %.1f vel %.1f "
+            "%.1f %.1f\n", fr.m_time, fr.m_ball.x(), fr.m_ball.y(),
+            fr.m_ball.z(), fr.m_ball_velocity.x(), fr.m_ball_velocity.y(),
+            fr.m_ball_velocity.z());
+        f << line;
+        for (unsigned int i = 0; i < fr.m_karts.size(); i++)
+        {
+            const GoalLogKart& k = fr.m_karts[i];
+            snprintf(line, sizeof(line), "  k%u %.1f %.1f %.1f %.2f %.1f %.1f "
+                "%d %.2f %d %d %s %.1f %.1f %.1f %.1f %.1f\n", i, k.m_xyz.x(),
+                k.m_xyz.y(), k.m_xyz.z(), k.m_heading, k.m_speed, k.m_accel,
+                k.m_brake, k.m_steer, k.m_nitro, k.m_skid, k.m_mode.c_str(),
+                k.m_target.x(), k.m_target.z(), k.m_velocity.x(),
+                k.m_velocity.y(), k.m_velocity.z());
+            f << line;
+        }
+    }
+    Log::info("SoccerWorld", "Goal log written to %s", path.c_str());
+}   // writeGoalLog
+
+//-----------------------------------------------------------------------------
 /** Sets the last kart that hit the ball, to be able to
  * identify the scorer later.
  */
 void SoccerWorld::setBallHitter(unsigned int kart_id)
 {
+    if (m_goal_log)
+        logEvent(kart_id, "touch");
     m_ball_hitter = kart_id;
     KartTeam team = getKartTeam(kart_id);
     if (team == KART_TEAM_RED) m_ball_hitter_red = kart_id;
@@ -1323,7 +1550,208 @@ void SoccerWorld::updateAIData()
     // Fill Ball and goals data
     m_bgd->updateBallAndGoal(getBallPosition(), getBallHeading());
 
+    updateAIRoles();
 }   // updateAIData
+
+//-----------------------------------------------------------------------------
+/** Give every AI kart a job for its team. The kart that can get to the ball
+ *  soonest in a useful way plays it, unless a human teammate already does, the
+ *  kart closest to the own goal defends, and any others support or attack.
+ */
+void SoccerWorld::updateAIRoles()
+{
+    m_ai_roles.assign(m_karts.size(), AI_ROLE_NONE);
+    // Where the ball will be soon counts, so that the kart in front of a moving
+    // ball goes for it instead of the one chasing it
+    const Vec3 ball = getBallPosition() + getBallVelocity() * 0.7f;
+
+    for (int t = 0; t < 2; t++)
+    {
+        const KartTeam team = t == 0 ? KART_TEAM_RED : KART_TEAM_BLUE;
+        const KartTeam opp = t == 0 ? KART_TEAM_BLUE : KART_TEAM_RED;
+
+        Vec3 to_goal = getGoalCenter(opp) - ball;
+        to_goal.setY(0.0f);
+        if (to_goal.length2() > 0.0f)
+            to_goal.normalize();
+
+        // Smaller is better, the distance is adjusted for karts which can't
+        // play the ball at once as they are on the wrong side or turned away
+        // The keeper stays the keeper, it plays a ball close to its goal
+        // itself. Handing the job over then would leave the goal to a kart
+        // that is far away. A keeper that went out too far is replaced by the
+        // AI closest to the goal.
+        const Vec3 own_goal = getGoalCenter(team);
+        const float field = (getGoalCenter(opp) - own_goal).length_2d();
+        std::vector<int> team_ai;
+        for (unsigned int i = 0; i < m_karts.size(); i++)
+        {
+            if (getKartTeam(i) == team &&
+                !m_karts[i]->getController()->isPlayerController())
+                team_ai.push_back(i);
+        }
+        int keeper = -1;
+        if (team_ai.size() >= 2)
+        {
+            const int current = m_ai_keeper[t];
+            if (std::find(team_ai.begin(), team_ai.end(), current) !=
+                team_ai.end() && (m_karts[current]->getXYZ() -
+                own_goal).length_2d() < field * 0.25f)
+            {
+                keeper = current;
+            }
+            else
+            {
+                float best = std::numeric_limits<float>::max();
+                for (int i : team_ai)
+                {
+                    float d = (m_karts[i]->getXYZ() - own_goal).length_2d();
+                    if (m_karts[i]->getKartAnimation())
+                        d += 40.0f;
+                    if (d < best)
+                    {
+                        best = d;
+                        keeper = i;
+                    }
+                }
+            }
+        }
+
+        // A keeper that just cleared the ball and is still on it, with the
+        // ball in front of it, keeps playing it: going back to the goal would
+        // give the ball away. The AI closest to the goal takes the goal over.
+        if (keeper != -1 && m_ball_hitter == keeper &&
+            !isBallMovingTowardGoal(team))
+        {
+            const Vec3 out = (getGoalCenter(opp) - own_goal) * (1.0f / field);
+            const Vec3 keeper_pos = m_karts[keeper]->getXYZ();
+            const Vec3 now = getBallPosition();
+            if ((keeper_pos - now).length_2d() < 8.0f &&
+                (keeper_pos - own_goal).dot(out) <
+                (now - own_goal).dot(out))
+            {
+                int new_keeper = -1;
+                float best = std::numeric_limits<float>::max();
+                for (int i : team_ai)
+                {
+                    if (i == keeper)
+                        continue;
+                    float d = (m_karts[i]->getXYZ() - own_goal).length_2d();
+                    if (m_karts[i]->getKartAnimation())
+                        d += 40.0f;
+                    if (d < best)
+                    {
+                        best = d;
+                        new_keeper = i;
+                    }
+                }
+                if (new_keeper != -1)
+                {
+                    m_ai_striker[t] = keeper;
+                    keeper = new_keeper;
+                }
+            }
+        }
+
+        int best_ai = -1;
+        float best_ai_score = std::numeric_limits<float>::max();
+        float best_human_score = std::numeric_limits<float>::max();
+        std::vector<int> ai_karts;
+        for (unsigned int i = 0; i < m_karts.size(); i++)
+        {
+            const AbstractKart* kart = m_karts[i].get();
+            if (getKartTeam(kart->getWorldKartId()) != team)
+                continue;
+            const bool human = kart->getController()->isPlayerController();
+            // In profiling mode the player kart is kept out of the game
+            if (human && UserConfigParams::m_arena_ai_stats)
+                continue;
+
+            Vec3 to_ball = ball - kart->getXYZ();
+            to_ball.setY(0.0f);
+            const float dist = to_ball.length();
+            if (dist > 0.0f)
+                to_ball /= dist;
+            Vec3 forward = kart->getTrans().getBasis().getColumn(2);
+            forward.setY(0.0f);
+            if (forward.length2() > 0.0f)
+                forward.normalize();
+
+            // At a kickoff all karts have a clear way to the ball, so it's for
+            // the closest one: the first start position of the team
+            float score = dist;
+            if (!isBallUntouched())
+            {
+                score += (1.0f - to_ball.dot(to_goal)) * 6.0f +
+                    (1.0f - to_ball.dot(forward)) * 4.0f;
+            }
+            if (kart->getKartAnimation())
+                score += 40.0f;
+
+            if (human)
+            {
+                // Only leave the ball to a human who is really going for it,
+                // at a kickoff that can be from far away
+                if ((dist < 15.0f || isBallUntouched()) &&
+                    kart->getSpeed() > 5.0f)
+                    best_human_score = std::min(best_human_score, score);
+                continue;
+            }
+            ai_karts.push_back(i);
+            if ((int)i == keeper)
+                continue;
+            if ((int)i == m_ai_striker[t])
+                score -= 12.0f;
+            if (score < best_ai_score)
+            {
+                best_ai_score = score;
+                best_ai = i;
+            }
+        }
+        if (best_ai == -1)
+        {
+            m_ai_striker[t] = m_ai_keeper[t] = -1;
+            continue;
+        }
+
+        m_ai_striker[t] = best_ai;
+        // If a human is doing better just back up and leave the ball alone
+        const bool human_plays_ball = best_human_score <
+            best_ai_score - (isBallUntouched() ? 0.0f : 2.0f);
+        m_ai_roles[best_ai] =
+            human_plays_ball ? AI_ROLE_SUPPORT : AI_ROLE_STRIKER;
+
+        m_ai_keeper[t] = keeper;
+        if (keeper != -1)
+            m_ai_roles[keeper] = AI_ROLE_KEEPER;
+
+        bool support = !human_plays_ball;
+        for (int i : ai_karts)
+        {
+            if (m_ai_roles[i] != AI_ROLE_NONE)
+                continue;
+            m_ai_roles[i] = support ? AI_ROLE_SUPPORT : AI_ROLE_ATTACKER;
+            support = !support;
+        }
+    }
+}   // updateAIRoles
+
+//-----------------------------------------------------------------------------
+Vec3 SoccerWorld::getGoalCenter(KartTeam team) const
+{
+    return m_bgd->getGoalCenter(team);
+}   // getGoalCenter
+
+//-----------------------------------------------------------------------------
+float SoccerWorld::getGoalHalfWidth(KartTeam team) const
+{
+    const CheckGoal* goal = m_bgd->getCheckGoal(team);
+    if (!goal)
+        return 0.0f;
+    Vec3 d = goal->getPoint(CheckGoal::POINT_FIRST) -
+        goal->getPoint(CheckGoal::POINT_LAST);
+    return d.length_2d() * 0.5f;
+}   // getGoalHalfWidth
 
 //-----------------------------------------------------------------------------
 int SoccerWorld::getAttacker(KartTeam team) const
@@ -1981,7 +2409,7 @@ write_once = 0;
     if (UserConfigParams::m_arena_ai_stats)
     {
         Log::verbose("Soccer AI profiling", "Total frames elapsed for a team"
-            " to win with 30 goals: %d", m_frame_count);
+            " to win with %d goals: %d", m_goal_target, m_frame_count);
 
         // Goal time statistics
         std::sort(m_goal_frame.begin(), m_goal_frame.end());

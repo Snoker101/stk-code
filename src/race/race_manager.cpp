@@ -359,8 +359,19 @@ void RaceManager::computeRandomKartList()
     }
 
     if(n>0)
+    {
+        // Light karts are the best at soccer, so that's what the best AIs use.
+        // Sara the Racer is the weakest of them, the AIs never use it.
+        const bool use_light = isSoccerMode() &&
+                               m_difficulty == DIFFICULTY_BEST;
+        std::vector<std::string> excluded;
+        if (isSoccerMode())
+            excluded.push_back("sara_the_racer");
         kart_properties_manager->getRandomKartList(n, &m_player_karts,
-                                                   &m_ai_kart_list   );
+                                                   &m_ai_kart_list,
+                                                   use_light ? "light" : "",
+                                                   excluded);
+    }
 
     if (m_ai_kart_override != "")
     {

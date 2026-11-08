@@ -23,6 +23,7 @@
 #include "states_screens/race_gui_base.hpp"
 #include "karts/abstract_kart.hpp"
 
+#include <deque>
 #include <string>
 
 class AbstractKart;
@@ -65,6 +66,20 @@ struct KartScore
 class SoccerWorld : public WorldWithRank
 {
 public:
+    /** The job of an AI kart in a team, see \ref updateAIRoles. */
+    enum AIRole
+    {
+        AI_ROLE_NONE,
+        /** Plays the ball. */
+        AI_ROLE_STRIKER,
+        /** Stays between the ball and the own goal. */
+        AI_ROLE_KEEPER,
+        /** Stays behind the ball to collect rebounds. */
+        AI_ROLE_SUPPORT,
+        /** Goes after the opposing kart closest to the ball. */
+        AI_ROLE_ATTACKER
+    };
+
     struct ScorerData
     {
         /** World ID of kart which scores. */
@@ -121,6 +136,13 @@ private:
 
     std::vector<KartDistanceMap> m_red_kdm;
     std::vector<KartDistanceMap> m_blue_kdm;
+
+    /** Current job of each kart, indexed by world kart id. */
+    std::vector<AIRole> m_ai_roles;
+    /** Last striker and keeper of the red (0) and blue (1) team, a job is
+     *  only handed over for a clear gain so that karts don't keep swapping. */
+    int m_ai_striker[2];
+    int m_ai_keeper[2];
     std::unique_ptr<BallGoalData> m_bgd;
 
     /** Keep a pointer to the track object of soccer ball */
@@ -156,6 +178,8 @@ private:
     void updateBallPosition(int ticks);
     /** Function to update data for AI usage. */
     void updateAIData();
+    /** Give every AI kart a job for its team, see \ref AIRole. */
+    void updateAIRoles();
     /** Get number of teammates in a team, used by starting position assign. */
     int getTeamNum(KartTeam team) const;
 
@@ -168,7 +192,47 @@ private:
 
     void resetKartsToSelfGoals();
 
+    /** Goal log (see --soccer-log): the last seconds of play are kept, and
+     *  written to a file at each goal, to see later how it was scored. */
+    struct GoalLogKart
+    {
+        Vec3 m_xyz;
+        Vec3 m_velocity;
+        float m_heading, m_speed, m_accel, m_steer;
+        bool m_brake, m_nitro, m_skid;
+        std::string m_mode;
+        Vec3 m_target;
+    };
+    struct GoalLogFrame
+    {
+        float m_time;
+        Vec3 m_ball, m_ball_velocity;
+        std::vector<GoalLogKart> m_karts;
+    };
+    struct GoalLogEvent
+    {
+        float m_time;
+        int m_kart;
+        std::string m_what;
+    };
+    static bool m_goal_log;
+    std::deque<GoalLogFrame> m_log_frames;
+    std::deque<GoalLogEvent> m_log_events;
+    /** Start time of the match, the name of its log files begin with it. */
+    std::string m_log_match;
+    int m_log_ticks;
+
+    float getLogTime() const;
+    void recordGoalLogFrame();
+    void writeGoalLog(bool first_goal);
+
 public:
+    /** Turn the goal log on or off, see --soccer-log. */
+    static void enableGoalLog(bool on)                     { m_goal_log = on; }
+    // ------------------------------------------------------------------------
+    /** Adds an event like a jump of a kart to the goal log. */
+    void logEvent(int kart_id, const std::string& what);
+    // ------------------------------------------------------------------------
 
     SoccerWorld();
     virtual ~SoccerWorld();
@@ -263,6 +327,22 @@ public:
     // ------------------------------------------------------------------------
     /** Get the AI who will attack the other team ball chaser. */
     int getAttacker(KartTeam team) const;
+    // ------------------------------------------------------------------------
+    /** True from a kickoff until the first time the ball is hit. */
+    bool isBallUntouched() const                { return m_ball_hitter == -1; }
+
+    // ------------------------------------------------------------------------
+    /** Get the current job of an AI kart. */
+    AIRole getAIRole(unsigned int kart_id) const
+    {
+        return kart_id < m_ai_roles.size() ? m_ai_roles[kart_id] : AI_ROLE_NONE;
+    }
+    // ------------------------------------------------------------------------
+    /** Get the center of the goal defended by a team. */
+    Vec3 getGoalCenter(KartTeam team) const;
+    // ------------------------------------------------------------------------
+    /** Get half of the width of the goal defended by a team. */
+    float getGoalHalfWidth(KartTeam team) const;
     // ------------------------------------------------------------------------
     void handlePlayerGoalFromServer(const NetworkString& ns);
     // ------------------------------------------------------------------------

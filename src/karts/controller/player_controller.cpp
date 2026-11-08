@@ -79,6 +79,92 @@ void set_jump_limit(float value)
     jump_limit = value;
 }
 //-----------------------------------------------------------------------------
+/** Computes the velocity a kart needs to jump at the soccer ball.
+ *  \param kart The kart that jumps.
+ *  \param soccer_world The current world.
+ *  \param[out] velocity The velocity to give to the kart.
+ *  \return True if the kart can jump at the ball now.
+ */
+bool PlayerController::computeBallJumpVelocity(const AbstractKart* kart,
+                                               const SoccerWorld* soccer_world,
+                                               Vec3* velocity)
+{
+        //get kart velocity
+        const Vec3 kartVel = kart->getBody()->getLinearVelocity();
+        kart_vy = kartVel.y();
+
+        //get kart position
+        kartPos = kart->getXYZ();
+        kart_y = kartPos.getY(); //elevation
+        kart_x = kartPos.getX();
+        kart_z = kartPos.getZ();
+
+        //get ball position
+        ballPos = soccer_world->getBallPosition();
+        ball_y = ballPos.getY(); //elevation
+        ball_x = ballPos.getX();
+        ball_z = ballPos.getZ();
+
+        if (((kart_vy >= 0) || (kart_vy < 0 && kart_y <= 0)) && ((ball_y - kart_y) < jump_ball_height_max)   && ((ball_y - kart_y) > jump_ball_height_min) &&  (sqrt(pow(kart_x - ball_x, 2) + pow(kart_z - ball_z, 2)) < jump_distance_threshold_moving) && (kart_y <= jump_limit))
+        {
+
+        //get ball velocity
+        const Vec3 ballVel = soccer_world->getBallVelocity();
+
+        Vec3 ballToKart = kartPos - ballPos;
+        float dotProduct = ballToKart.getX() * ballVel.getX() + ballToKart.getZ() * ballVel.getZ();
+        bool ballVelocityTowardsKartPosition = (dotProduct > 0); //true if dotProduct > 0
+
+        float dotProductVel = kartVel.getX() * ballVel.getX() + kartVel.getZ() * ballVel.getZ();
+        bool ballVelocitySameDirectionAsKartVelocity = (dotProductVel > 0); //true if dotProduct > 0
+
+            float kartBallDistance = sqrt(pow(ball_x - kart_x, 2) + pow(ball_y - kart_y, 2)+  pow(ball_z - kart_z, 2));
+            float t;
+
+          //  Determine the interception time, such that kart launch velocity = Vlaunch
+
+            float Vlaunch;
+
+            if ((!ballVelocityTowardsKartPosition)) Vlaunch = ballVel.length()+kartBallDistance/1.2;
+
+            else Vlaunch = kartBallDistance;
+            if ((!ballVelocitySameDirectionAsKartVelocity && !ballVelocityTowardsKartPosition)) Vlaunch = 0;
+
+            // Assign values to the variables as needed
+
+            // Compute the quantity under the square root
+            float q = 4 * pow(ballVel.getX() * (ball_x - kart_x) + ballVel.getY() * (ball_y - kart_y) + ballVel.getZ() * (ball_z - kart_z), 2) - 4 * (-pow(Vlaunch, 2) + pow(ballVel.getX(), 2) + pow(ballVel.getY(), 2) + pow(ballVel.getZ(), 2)) * (pow(ball_x - kart_x, 2) + pow(ball_y - kart_y, 2) + pow(ball_z - kart_z, 2));
+
+            // Check if q is negative
+            if (q < 0) {
+                // Set t to zero
+                t = 0;
+            } else {
+                // Compute t using the formula
+                t = -(ballVel.getX() * ball_x - ballVel.getX() * kart_x + ballVel.getY() * ball_y - ballVel.getY() * kart_y + ballVel.getZ() * ball_z + 0.5 * sqrt(q) - ballVel.getZ() * kart_z) / (-pow(Vlaunch, 2) + pow(ballVel.getX(), 2) + pow(ballVel.getY(), 2) + pow(ballVel.getZ(), 2));
+
+
+            if (t>0){
+            //calculate the x, y and z velocities required for the kart to intercept the ball
+            const float vx = (ballVel.getX()*t + ball_x - kart_x) / t;
+            const float vz = (ballVel.getZ()*t + ball_z - kart_z) / t;
+            const float vy = (-0.5*gball*t*t + ballVel.getY()*t + ball_y - kart_y + 0.5*gkart*t*t) / t;
+
+
+            if (vy>0){
+            //the kart's linear velocity to intercept the ball
+            *velocity = Vec3(vx, vy, vz);
+            return true;
+
+            }
+
+            }
+                }
+        }
+    return false;
+}   // computeBallJumpVelocity
+
+//-----------------------------------------------------------------------------
 /** Resets the player kart for a new or restarted race.
  */
 void PlayerController::reset()
@@ -238,82 +324,15 @@ bool PlayerController::action(PlayerAction action, int value, bool dry_run)
         SET_OR_TEST(m_prev_nitro, value != 0 );
         // Enable nitro when accelerating or braking
         SET_OR_TEST_GETTER(Nitro, (((value!=0) && m_controls->getAccel()) || ((value!=0) && m_controls->getBrake())));
-        if ((!m_controls->getAccel()))
-    {
-        //get kart velocity
-        const Vec3 kartVel = m_kart->getBody()->getLinearVelocity();
-        kart_vy = kartVel.y();
-
-        //get kart position
-        kartPos = m_kart->getXYZ();
-        kart_y = kartPos.getY(); //elevation
-        kart_x = kartPos.getX();
-        kart_z = kartPos.getZ();
-
-        //get ball position
-        ballPos = soccer_world->getBallPosition();
-        ball_y = ballPos.getY(); //elevation
-        ball_x = ballPos.getX();
-        ball_z = ballPos.getZ();
-
-        if (((kart_vy >= 0) || (kart_vy < 0 && kart_y <= 0)) && ((ball_y - kart_y) < jump_ball_height_max)   && ((ball_y - kart_y) > jump_ball_height_min) &&  (sqrt(pow(kart_x - ball_x, 2) + pow(kart_z - ball_z, 2)) < jump_distance_threshold_moving) && (kart_y <= jump_limit))
+        if (!m_controls->getAccel() && soccer_world)
         {
-
-        //get ball velocity
-        const Vec3 ballVel = soccer_world->getBallVelocity();
-
-        Vec3 ballToKart = kartPos - ballPos;
-        float dotProduct = ballToKart.getX() * ballVel.getX() + ballToKart.getZ() * ballVel.getZ();
-        bool ballVelocityTowardsKartPosition = (dotProduct > 0); //true if dotProduct > 0
-
-        float dotProductVel = kartVel.getX() * ballVel.getX() + kartVel.getZ() * ballVel.getZ();
-        bool ballVelocitySameDirectionAsKartVelocity = (dotProductVel > 0); //true if dotProduct > 0
-
-            float kartBallDistance = sqrt(pow(ball_x - kart_x, 2) + pow(ball_y - kart_y, 2)+  pow(ball_z - kart_z, 2));
-            float t;
-
-          //  Determine the interception time, such that kart launch velocity = Vlaunch
-
-            float Vlaunch;
-
-            if ((!ballVelocityTowardsKartPosition)) Vlaunch = ballVel.length()+kartBallDistance/1.2;
-
-            else Vlaunch = kartBallDistance;
-            if ((!ballVelocitySameDirectionAsKartVelocity && !ballVelocityTowardsKartPosition)) Vlaunch = 0;
-
-            // Assign values to the variables as needed
-
-            // Compute the quantity under the square root
-            float q = 4 * pow(ballVel.getX() * (ball_x - kart_x) + ballVel.getY() * (ball_y - kart_y) + ballVel.getZ() * (ball_z - kart_z), 2) - 4 * (-pow(Vlaunch, 2) + pow(ballVel.getX(), 2) + pow(ballVel.getY(), 2) + pow(ballVel.getZ(), 2)) * (pow(ball_x - kart_x, 2) + pow(ball_y - kart_y, 2) + pow(ball_z - kart_z, 2));
-
-            // Check if q is negative
-            if (q < 0) {
-                // Set t to zero
-                t = 0;
-            } else {
-                // Compute t using the formula
-                t = -(ballVel.getX() * ball_x - ballVel.getX() * kart_x + ballVel.getY() * ball_y - ballVel.getY() * kart_y + ballVel.getZ() * ball_z + 0.5 * sqrt(q) - ballVel.getZ() * kart_z) / (-pow(Vlaunch, 2) + pow(ballVel.getX(), 2) + pow(ballVel.getY(), 2) + pow(ballVel.getZ(), 2));
-
-
-            if (t>0){
-            //calculate the x, y and z velocities required for the kart to intercept the ball
-            const float vx = (ballVel.getX()*t + ball_x - kart_x) / t;
-            const float vz = (ballVel.getZ()*t + ball_z - kart_z) / t;
-            const float vy = (-0.5*gball*t*t + ballVel.getY()*t + ball_y - kart_y + 0.5*gkart*t*t) / t;
-
-
-            if (vy>0){
-            //set the kart's linear velocity to intercept the ball
-            m_kart->getBody()->setLinearVelocity(Vec3(vx, vy, vz));
-           // if (m_kart->getNumPowerup() == 0)
-           //     m_kart->setPowerup(PowerupManager::POWERUP_BOWLING, 1);
-
+            Vec3 jump_velocity;
+            if (computeBallJumpVelocity(m_kart, soccer_world, &jump_velocity))
+            {
+                m_kart->getBody()->setLinearVelocity(jump_velocity);
+                soccer_world->logEvent(m_kart->getWorldKartId(), "jump");
             }
-
-            }
-                }
         }
-    }
         break;
     case PA_RESCUE:
         SET_OR_TEST_GETTER(Rescue, value!=0);

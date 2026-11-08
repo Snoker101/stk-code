@@ -29,6 +29,7 @@
 #include "karts/abstract_kart.hpp"
 #include "karts/controller/controller.hpp"
 #include "karts/kart_properties.hpp"
+#include "modes/soccer_world.hpp"
 #include "modes/world.hpp"
 #include "network/network_config.hpp"
 #include "network/network_string.hpp"
@@ -263,6 +264,22 @@ void Powerup::use()
         PlayerManager::increaseAchievement(AchievementsStatus::POWERUP_USED, 1);
         if (RaceManager::get()->isLinearRaceMode())
             PlayerManager::increaseAchievement(AchievementsStatus::POWERUP_USED_1RACE, 1);
+    }
+
+    // For the goal log of soccer, to see how a goal was scored
+    if (m_type != PowerupManager::POWERUP_NOTHING)
+    {
+        SoccerWorld* soccer = dynamic_cast<SoccerWorld*>(World::getWorld());
+        if (soccer)
+        {
+            static const char* names[] = { "nothing", "bubblegum", "cake",
+                "bowling", "zipper", "plunger", "switch", "swatter",
+                "rubberball", "parachute", "anvil" };
+            const int type = (int)m_type;
+            soccer->logEvent(m_kart->getWorldKartId(), std::string("fire_") +
+                (type >= 0 && type <= (int)PowerupManager::POWERUP_ANVIL ?
+                 names[type] : "item"));
+        }
     }
 
     // Play custom kart sound when collectible is used //TODO: what about the bubble gum?

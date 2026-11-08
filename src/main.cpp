@@ -238,6 +238,7 @@ extern "C" {
 #include "items/projectile_manager.hpp"
 #include "karts/combined_characteristic.hpp"
 #include "karts/controller/ai_base_controller.hpp"
+#include "karts/controller/soccer_ai.hpp"
 #include "karts/controller/network_ai_controller.hpp"
 #include "karts/kart_model.hpp"
 #include "karts/kart_properties.hpp"
@@ -245,6 +246,7 @@ extern "C" {
 #include "karts/official_karts.hpp"
 #include "modes/cutscene_world.hpp"
 #include "modes/demo_world.hpp"
+#include "modes/soccer_world.hpp"
 #include "network/protocols/connect_to_server.hpp"
 #include "network/protocols/client_lobby.hpp"
 #include "network/protocols/server_lobby.hpp"
@@ -789,6 +791,11 @@ void cmdDebugHelp()
     "       --rewind                    Enable the rewind manager.\n"
     "       --battle-ai-stats           Enable verbose logging of AI karts in battle modes.\n"
     "       --soccer-ai-stats           Enable verbose logging of AI karts in soccer mode.\n"
+    "       --soccer-ai-baseline=TEAM   With --soccer-ai-stats: red, blue or both teams use the\n"
+    "                                   basic soccer AI, to compare it against the full one.\n"
+    "       --soccer-ai-goals=N         With --soccer-ai-stats: play until a team has N goals.\n"
+    "       --soccer-log                At each goal in offline soccer, write the last 10 seconds\n"
+    "                                   of play to the soccer_log folder in the config directory.\n"
     "       --test-ai=n                 Use the test-ai for every n-th AI kart.\n"
     "                                   (so n=1 means all Ais will be the test ai)\n"
     "       --disable-item-collection   Disable item collection. Useful for\n"
@@ -1152,8 +1159,16 @@ int handleCmdLine(bool has_server_config, bool has_parent_process)
         UserConfigParams::m_fps_debug = true;
     if (CommandLine::has("--rewind") )
         RewindManager::setEnable(true);
+    if (CommandLine::has("--soccer-log"))
+        SoccerWorld::enableGoalLog(true);
     if(CommandLine::has("--soccer-ai-stats"))
     {
+        std::string baseline;
+        if (CommandLine::has("--soccer-ai-baseline", &baseline))
+        {
+            SoccerAI::setBaselineTeams(baseline == "red" || baseline == "both",
+                                       baseline == "blue" || baseline == "both");
+        }
         UserConfigParams::m_arena_ai_stats=true;
         RaceManager::get()->setMinorMode(RaceManager::MINOR_MODE_SOCCER);
         std::vector<std::string> l;
@@ -1161,11 +1176,15 @@ int handleCmdLine(bool has_server_config, bool has_parent_process)
             l.push_back("tux");
         RaceManager::get()->setDefaultAIKartList(l);
         RaceManager::get()->setNumKarts(9);
-        RaceManager::get()->setMaxGoal(30);
+        RaceManager::get()->setNumRedAI(4);
+        RaceManager::get()->setNumBlueAI(4);
+        int goals = 30;
+        CommandLine::has("--soccer-ai-goals", &goals);
+        RaceManager::get()->setMaxGoal(goals);
         RaceManager::get()->setTrack("soccer_field");
         RaceManager::get()->setDifficulty(RaceManager::Difficulty(3));
         UserConfigParams::m_no_start_screen = true;
-        UserConfigParams::m_race_now = true;
+        // No m_race_now: the ball is only released at the end of the countdown
         UserConfigParams::m_sfx = false;
         UserConfigParams::m_music = false;
     }

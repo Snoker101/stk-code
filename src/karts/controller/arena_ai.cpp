@@ -143,12 +143,8 @@ void ArenaAI::update(int ticks)
     }
     useItems(dt);
 
-    if (m_kart->getSpeed() > 15.0f && !m_is_uturn && m_turn_radius > 30.0f &&
-        !ignorePathFinding())
-    {
-        // Only use nitro when turn angle is big (180 - angle)
+    if (!m_is_uturn && shouldUseNitro())
         m_controls->setNitro(true);
-    }
 
     if (m_is_uturn)
     {
@@ -256,20 +252,14 @@ void ArenaAI::configSteering()
 
     if (ignorePathFinding())
     {
-        // Steer directly, don't brake
+        // Steer directly, don't brake unless wanted
         m_turn_radius = 100.0f;
+        if (brakeForTurns())
+            determineTurnRadius(m_target_point, NULL, &m_turn_radius);
 #ifdef AI_DEBUG
         m_debug_sphere->setPosition(m_target_point.toIrrVector());
 #endif
-        if (m_target_point_lc.z() < 0)
-        {
-            m_is_uturn = true;
-            m_reverse_point = m_target_point;
-        }
-        else
-        {
-            m_steering_angle = steerToPoint(m_target_point);
-        }
+        steerToTarget();
         return;
     }
 
@@ -284,17 +274,43 @@ void ArenaAI::configSteering()
         m_debug_sphere->setVisible(true);
         m_debug_sphere->setPosition(m_target_point.toIrrVector());
 #endif
-        if (m_target_point_lc.z() < 0)
-        {
-            m_is_uturn = true;
-            m_reverse_point = m_target_point;
-        }
-        else
-        {
-            m_steering_angle = steerToPoint(m_target_point);
-        }
+        steerToTarget();
     }
 }   // configSteering
+
+//-----------------------------------------------------------------------------
+/** Steer to the current target point, it will either reverse or turn around
+ *  while driving forward if the target point is behind the kart.
+ */
+void ArenaAI::steerToTarget()
+{
+    if (m_target_point_lc.z() >= 0)
+    {
+        m_steering_angle = steerToPoint(m_target_point);
+    }
+    else if (shouldReverseToTurn(m_target_point_lc))
+    {
+        m_is_uturn = true;
+        m_reverse_point = m_target_point;
+    }
+    else
+    {
+        // Same value as steerToPoint for a point which needs skidding
+        const float full_lock = m_kart->getMaxSteerAngle() *
+            m_ai_properties->m_skidding_threshold + 0.1f;
+        m_steering_angle = m_target_point_lc.x() < 0 ? -full_lock : full_lock;
+    }
+}   // steerToTarget
+
+//-----------------------------------------------------------------------------
+/** Only use nitro when turn angle is big (180 - angle).
+ *  \return True if AI should use nitro for this frame.
+ */
+bool ArenaAI::shouldUseNitro()
+{
+    return m_kart->getSpeed() > 15.0f && m_turn_radius > 30.0f &&
+        !ignorePathFinding();
+}   // shouldUseNitro
 
 //-----------------------------------------------------------------------------
 /** Determine whether AI is stuck, by checking if it stays on the same node for
@@ -306,7 +322,9 @@ void ArenaAI::checkIfStuck(const float dt)
 {
     if (m_is_stuck) return;
 
-    if (m_kart->getKartAnimation() || isWaiting())
+    // A kart which stood still on purpose isn't stuck when it starts to drive
+    // again, otherwise it reverses at the moment it needs to go somewhere
+    if (m_kart->getKartAnimation() || isWaiting() || holdPosition())
     {
         m_on_node.clear();
         m_time_since_driving = 0.0f;
@@ -318,7 +336,7 @@ void ArenaAI::checkIfStuck(const float dt)
     if ((m_time_since_driving >=
         (m_cur_difficulty == RaceManager::DIFFICULTY_EASY ? 2.0f : 1.5f)
         && m_on_node.size() < 2 && !m_is_uturn &&
-        fabsf(m_kart->getSpeed()) < 3.0f) || isStuck() == true)
+        fabsf(m_kart->getSpeed()) < 3.0f) || isStuck() == true || isBlocked())
     {
         // AI is stuck, reset now and try to get unstuck at next frame
         m_on_node.clear();
@@ -343,7 +361,7 @@ void ArenaAI::configSpeed()
     // A kart will not brake when the speed is already slower than this
     // value. This prevents a kart from going too slow (or even backwards)
     // in tight curves.
-    const float MIN_SPEED = 5.0f;
+    const float MIN_SPEED = getMinBrakeSpeed();
     const float handicap = (m_cur_difficulty == RaceManager::DIFFICULTY_EASY
                             ? 0.7f : 1.0f                                   );
 
@@ -354,7 +372,7 @@ void ArenaAI::configSpeed()
         // Brake if necessary
         m_controls->setBrake(true);
     }
-    else
+    else if (!holdPosition())
     {
         // Otherwise accelerate
         m_controls->setAccel(stk_config->m_ai_acceleration * handicap);
@@ -373,7 +391,7 @@ void ArenaAI::doUTurn(const float dt)
     m_time_since_uturn += dt;
 
     if ((m_target_point_lc.z() > 0 && fabsf(turn_angle) < 0.2f) ||
-        m_time_since_uturn > 1.5f)
+        m_time_since_uturn > getMaxUTurnTime())
     {
         // End U-turn until target point is in front of this AI
         m_is_uturn = false;

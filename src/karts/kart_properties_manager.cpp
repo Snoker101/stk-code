@@ -619,10 +619,17 @@ const std::vector<int> KartPropertiesManager::getKartsInGroup(const std::string&
  *  \param ai_list        List of AI karts already selected (eg through the
  *                        command line). The random AIs will also be added
  *                        to this list.
+ *  \param preferred_type If not empty, only karts of this type (eg "light")
+ *                        are used if there is any, including the karts of
+ *                        the players.
+ *  \param excluded       Karts that are never selected, unless there is no
+ *                        other kart.
  */
 void KartPropertiesManager::getRandomKartList(int count,
                                             RemoteKartInfoList* existing_karts,
-                                            std::vector<std::string> *ai_list)
+                                            std::vector<std::string> *ai_list,
+                                            const std::string& preferred_type,
+                                            const std::vector<std::string>& excluded)
 {
     // First: set up flags (based on global kart
     // index) for which karts are already used
@@ -676,8 +683,39 @@ void KartPropertiesManager::getRandomKartList(int count,
             if (karts_in_group.empty())
                 karts_in_group = getKartsInGroup(DEFAULT_GROUP_NAME);
 
+            std::vector<int> allowed;
+            for (int id : karts_in_group)
+            {
+                if (std::find(excluded.begin(), excluded.end(),
+                    m_karts_properties[id].getIdent()) == excluded.end())
+                    allowed.push_back(id);
+            }
+            if (!allowed.empty())
+                karts_in_group = allowed;
+
+            // If a type is preferred only use that if there is any. There are
+            // few karts of each type, so the karts of the players are used too
+            // and a kart can be used by several AIs.
+            if (!preferred_type.empty())
+            {
+                for (int id : karts_in_group)
+                {
+                    const KartProperties &kp = m_karts_properties[id];
+                    if (kp.getKartType() == preferred_type &&
+                        m_kart_available[id] &&
+                        !PlayerManager::getCurrentPlayer()
+                                                 ->isLocked(kp.getIdent()))
+                    {
+                        random_kart_queue.push_back(kp.getIdent());
+                    }
+                }
+            }
+
+            const bool found_preferred = !random_kart_queue.empty();
+
             // first try not to use a kart already used by a player
-            for (unsigned int i=0; i<karts_in_group.size(); i++)
+            for (unsigned int i=0;
+                 !found_preferred && i<karts_in_group.size(); i++)
             {
                 const KartProperties &kp=m_karts_properties[karts_in_group[i]];
                 if (!used[karts_in_group[i]]                 &&
