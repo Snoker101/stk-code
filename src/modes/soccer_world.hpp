@@ -143,6 +143,10 @@ private:
      *  only handed over for a clear gain so that karts don't keep swapping. */
     int m_ai_striker[2];
     int m_ai_keeper[2];
+    /** Until when a human of the team (red, blue) keeps the ball, in ticks. */
+    int m_human_ball_until[2];
+    /** If a human of the team (red, blue) is playing the ball now. */
+    bool m_human_has_ball[2];
     std::unique_ptr<BallGoalData> m_bgd;
 
     /** Keep a pointer to the track object of soccer ball */
@@ -330,6 +334,10 @@ public:
     // ------------------------------------------------------------------------
     /** True from a kickoff until the first time the ball is hit. */
     bool isBallUntouched() const                { return m_ball_hitter == -1; }
+    // ------------------------------------------------------------------------
+    /** If a human of this team has the ball, so its AIs must leave it alone. */
+    bool isBallWithHuman(KartTeam team) const
+                      { return m_human_has_ball[team == KART_TEAM_RED ? 0 : 1]; }
 
     // ------------------------------------------------------------------------
     /** Get the current job of an AI kart. */

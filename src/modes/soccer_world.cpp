@@ -479,6 +479,8 @@ void SoccerWorld::reset(bool restart)
     m_ai_roles.clear();
     m_ai_striker[0] = m_ai_striker[1] = -1;
     m_ai_keeper[0] = m_ai_keeper[1] = -1;
+    m_human_ball_until[0] = m_human_ball_until[1] = 0;
+    m_human_has_ball[0] = m_human_has_ball[1] = false;
     m_ball_heading = 0.0f;
     m_ball_invalid_timer = 0;
     m_goal_transforms.clear();
@@ -1155,6 +1157,8 @@ void SoccerWorld::resetKartsToSelfGoals()
     // Jobs are given again for the new kickoff, from where the karts are then
     m_ai_striker[0] = m_ai_striker[1] = -1;
     m_ai_keeper[0] = m_ai_keeper[1] = -1;
+    m_human_ball_until[0] = m_human_ball_until[1] = 0;
+    m_human_has_ball[0] = m_human_has_ball[1] = false;
 
     m_ball->setEnabled(true);
     m_ball->reset();
@@ -1590,6 +1594,26 @@ void SoccerWorld::updateAIRoles()
                 !m_karts[i]->getController()->isPlayerController())
                 team_ai.push_back(i);
         }
+        auto closest_to_own_goal = [&](int excluded)
+        {
+            int closest = -1;
+            float best = std::numeric_limits<float>::max();
+            for (int i : team_ai)
+            {
+                if (i == excluded)
+                    continue;
+                float d = (m_karts[i]->getXYZ() - own_goal).length_2d();
+                if (m_karts[i]->getKartAnimation())
+                    d += 40.0f;
+                if (d < best)
+                {
+                    best = d;
+                    closest = i;
+                }
+            }
+            return closest;
+        };
+
         int keeper = -1;
         if (team_ai.size() >= 2)
         {
@@ -1602,19 +1626,28 @@ void SoccerWorld::updateAIRoles()
             }
             else
             {
-                float best = std::numeric_limits<float>::max();
-                for (int i : team_ai)
+                keeper = closest_to_own_goal(-1);
+            }
+        }
+
+        // At a kickoff the ball is for the AI closest to it. In a team of two
+        // AIs that's also the one closest to the goal, as they start in the
+        // same row, so the other one takes the goal.
+        if (keeper != -1 && isBallUntouched())
+        {
+            int closest_to_ball = -1;
+            float best = std::numeric_limits<float>::max();
+            for (int i : team_ai)
+            {
+                const float d = (m_karts[i]->getXYZ() - ball).length_2d();
+                if (d < best)
                 {
-                    float d = (m_karts[i]->getXYZ() - own_goal).length_2d();
-                    if (m_karts[i]->getKartAnimation())
-                        d += 40.0f;
-                    if (d < best)
-                    {
-                        best = d;
-                        keeper = i;
-                    }
+                    best = d;
+                    closest_to_ball = i;
                 }
             }
+            if (closest_to_ball == keeper)
+                keeper = closest_to_own_goal(keeper);
         }
 
         // A keeper that just cleared the ball and is still on it, with the
@@ -1630,21 +1663,7 @@ void SoccerWorld::updateAIRoles()
                 (keeper_pos - own_goal).dot(out) <
                 (now - own_goal).dot(out))
             {
-                int new_keeper = -1;
-                float best = std::numeric_limits<float>::max();
-                for (int i : team_ai)
-                {
-                    if (i == keeper)
-                        continue;
-                    float d = (m_karts[i]->getXYZ() - own_goal).length_2d();
-                    if (m_karts[i]->getKartAnimation())
-                        d += 40.0f;
-                    if (d < best)
-                    {
-                        best = d;
-                        new_keeper = i;
-                    }
-                }
+                const int new_keeper = closest_to_own_goal(keeper);
                 if (new_keeper != -1)
                 {
                     m_ai_striker[t] = keeper;
@@ -1656,6 +1675,8 @@ void SoccerWorld::updateAIRoles()
         int best_ai = -1;
         float best_ai_score = std::numeric_limits<float>::max();
         float best_human_score = std::numeric_limits<float>::max();
+        float human_ball_dist = std::numeric_limits<float>::max();
+        float human_speed = 0.0f;
         std::vector<int> ai_karts;
         for (unsigned int i = 0; i < m_karts.size(); i++)
         {
@@ -1690,6 +1711,13 @@ void SoccerWorld::updateAIRoles()
 
             if (human)
             {
+                const float ball_dist =
+                    (getBallPosition() - kart->getXYZ()).length_2d();
+                if (ball_dist < human_ball_dist)
+                {
+                    human_ball_dist = ball_dist;
+                    human_speed = kart->getSpeed();
+                }
                 // Only leave the ball to a human who is really going for it,
                 // at a kickoff that can be from far away
                 if ((dist < 15.0f || isBallUntouched()) &&
@@ -1715,8 +1743,21 @@ void SoccerWorld::updateAIRoles()
         }
 
         m_ai_striker[t] = best_ai;
+        // A human on the ball keeps it, for a moment after losing contact too
+        // so that the AIs don't go back and forth. It's over when the AI is
+        // clearly closer.
+        const float ai_ball_dist =
+            (getBallPosition() - m_karts[best_ai]->getXYZ()).length_2d();
+        const int now = getTicksSinceStart();
+        if (human_ball_dist < 5.0f && human_speed > 5.0f &&
+            human_ball_dist < ai_ball_dist)
+            m_human_ball_until[t] = now + stk_config->time2Ticks(1.0f);
+        m_human_has_ball[t] = now < m_human_ball_until[t] &&
+            ai_ball_dist + 2.0f >= human_ball_dist;
+
         // If a human is doing better just back up and leave the ball alone
-        const bool human_plays_ball = best_human_score <
+        const bool human_plays_ball = m_human_has_ball[t] ||
+            best_human_score <
             best_ai_score - (isBallUntouched() ? 0.0f : 2.0f);
         m_ai_roles[best_ai] =
             human_plays_ball ? AI_ROLE_SUPPORT : AI_ROLE_STRIKER;

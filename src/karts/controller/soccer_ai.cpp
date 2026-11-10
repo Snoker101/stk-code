@@ -255,6 +255,7 @@ void SoccerAI::update(int ticks)
         resetAfterStop();
         m_controls->setBrake(false);
         m_controls->setAccel(0.0f);
+        m_controls->setNitro(false);
         AIBaseController::update(ticks);
         return;
     }
@@ -888,8 +889,10 @@ bool SoccerAI::shouldKeeperPlayBall() const
     const float across = std::max(std::min((ball - own_goal).dot(side),
         half_width), -half_width);
     const float mouth_distance = (ball - (own_goal + side * across)).length();
-    return mouth_distance < field * 0.22f ||
-        m_world->isBallMovingTowardGoal(m_cur_team);
+    if (m_world->isBallMovingTowardGoal(m_cur_team))
+        return true;
+    return mouth_distance < field * 0.22f &&
+        !m_world->isBallWithHuman(m_cur_team);
 }   // shouldKeeperPlayBall
 
 //-----------------------------------------------------------------------------
@@ -1144,23 +1147,32 @@ void SoccerAI::doSupport()
         flatNormal(m_world->getGoalCenter(m_opp_team) - ball);
     const Vec3 side(to_goal.z(), 0.0f, -to_goal.x());
     const float side_sign = m_kart->getWorldKartId() % 2 == 0 ? 1.0f : -1.0f;
+    const bool human_has_ball = m_world->isBallWithHuman(m_cur_team);
     // Close enough for a good hit: take it, the striker can't be everywhere
     const Vec3 to_ball = flat(ball) - flat(m_kart->getXYZ());
-    if (to_ball.length() < 12.0f && flatNormal(to_ball).dot(to_goal) > 0.6f)
+    if (!human_has_ball && to_ball.length() < 12.0f &&
+        flatNormal(to_ball).dot(to_goal) > 0.6f)
     {
         playBall();
         return;
     }
 
+    // Next to a wall the own side can be outside the field. With a human on
+    // the ball the other side is then used, to never have to go for the ball
     for (float back : { 14.0f, 7.0f })
     {
-        Vec3 position = ball - to_goal * back + side * side_sign * back * 0.4f;
-        position.setY(m_kart->getXYZ().y());
-        const int node = findNode(position);
-        if (node != Graph::UNKNOWN_SECTOR)
+        for (float sign : { side_sign, -side_sign })
         {
-            setTargetAvoidingBall(position, node);
-            return;
+            if (sign != side_sign && !human_has_ball)
+                continue;
+            Vec3 position = ball - to_goal * back + side * sign * back * 0.4f;
+            position.setY(m_kart->getXYZ().y());
+            const int node = findNode(position);
+            if (node != Graph::UNKNOWN_SECTOR)
+            {
+                setTargetAvoidingBall(position, node);
+                return;
+            }
         }
     }
     setTarget(ball, ball_node);
@@ -1181,7 +1193,8 @@ void SoccerAI::doAttacker()
     // In a good place to shoot: same as support
     const Vec3 ball_pos = m_world->getBallPosition();
     const Vec3 to_ball = flat(ball_pos) - flat(m_kart->getXYZ());
-    if (to_ball.length() < 12.0f && flatNormal(to_ball).dot(
+    if (!m_world->isBallWithHuman(m_cur_team) &&
+        to_ball.length() < 12.0f && flatNormal(to_ball).dot(
         flatNormal(m_world->getGoalCenter(m_opp_team) - ball_pos)) > 0.6f)
     {
         playBall();

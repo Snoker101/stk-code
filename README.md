@@ -11,8 +11,25 @@ The SuperTuxKart homepage can be found at <https://supertuxkart.net/>. There is 
 
 The latest release binaries can be found [here](https://github.com/supertuxkart/stk-code/releases/latest), and those of preview releases [here](https://github.com/supertuxkart/stk-code/releases/preview).
 
-# This branch called "new" is the latest version of Snoccer server
-## It includes an advanced ranking system for soccer (to the best of our knowledge it marks the most advanced publicly available ranking system for STK soccer).
+# Snoccer: improved offline bots
+This branch, `improved_offline_bots`, is the Snoccer server version with much stronger soccer bots for offline play. Online bots are not changed yet.
+
+It still includes the advanced ranking system for soccer (to the best of our knowledge the most advanced publicly available ranking system for STK soccer).
+
+## The bots
+- **Difficulty:** Novice uses the original simple bots. Intermediate, Expert and SuperTux use the new ones. On SuperTux they also jump at the ball and pick light karts. Bots get no extra speed, nitro or items: they win on skill alone.
+- **Teamwork:** each bot has a job (striker, goalie, support or attacker), and the jobs change during play. At a kickoff the bot closest to the ball takes it. A goalie that clears the ball and is still on it keeps attacking, and a teammate takes the goal.
+- **Playing the ball:** bots predict where the ball is going, drive around it to hit it toward the goal, and use nitro and drifting to shoot. They also fire bowling balls at the ball.
+- **Goalkeeping:** the goalie comes out to meet shots and reacts to bowling balls aimed at the ball or already flying at it.
+- **Human teammates:** when you have the ball, your bots leave it to you and stay out of your way.
+- **Karts:** bots never pick Sara the Racer in soccer.
+
+## Options for testing the bots
+- `--soccer-log`: at each goal in offline soccer, writes the last 10 seconds of play (ball, karts, controls and what each bot was doing) to the `soccer_log` folder in the config directory.
+- `--soccer-ai-stats`: plays a 4 vs 4 bot match without a player and logs the result.
+- `--soccer-ai-baseline=red|blue|both`: with `--soccer-ai-stats`, that team uses the original simple bots, to compare old and new.
+- `--soccer-ai-goals=N`: with `--soccer-ai-stats`, the match ends when a team has N goals.
+
 # Important
 This version uses SQLite3 DB to save ranking data, on your system you have to install the package libsqlite3-dev. For debian: "sudo apt install libsqlite3-dev"
 
