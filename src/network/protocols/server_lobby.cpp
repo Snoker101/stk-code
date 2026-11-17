@@ -679,8 +679,7 @@ void ServerLobby::updateTracksForMode()
         new_file << "Rankings reset at the start of every month." << std::endl;
         new_file << "Type /score for the live score." << std::endl;
         new_file << "Type /poss for live ball possession." << std::endl;
-        new_file << "Type /stats to see stats from the last match." << std::endl;
-        new_file << "Type /allstats to see every player's last match stats." << std::endl;
+        new_file << "Type /stats to see every player's last match stats." << std::endl;
         new_file << "Type /new to see what's new on the server." << std::endl;
         new_file << "Type /tip to read a new tip." << std::endl;
         new_file << "Light karts are the best choice for soccer." << std::endl;
@@ -4984,7 +4983,7 @@ void ServerLobby::resetServer()
     m_game_setup->addServerInfo(server_info);
     sendMessageToPeersInServer(server_info);
     delete server_info;
-    // Stats of the match that just ended (same as /stats), written by
+    // Summary of the match that just ended (best players), written by
     // SoccerWorld, shown below the server description
     if (m_send_stats_after_reset.exchange(false))
     {
@@ -6730,35 +6729,7 @@ else if (argv[0] == "alldata")
     return;
     }
 
-else if (argv[0] == "stats")
-    {
-    NetworkString* chat = getNetworkString(m_type);
-    chat->addUInt8(LE_CHAT);
-    chat->setSynchronous(true);
-
-    std::ifstream file("last_match_stats.txt");
-    std::stringstream buffer;
-
-    if (!file.is_open()) // check if file is not found
-    {
-        std::ofstream new_file("last_match_stats.txt"); // create new file
-        new_file << "No stats available"; // write content to file
-        new_file.close(); // close file
-        file.open("last_match_stats.txt"); // reopen file to read content
-    }
-
-    buffer << file.rdbuf();
-    std::string msg = buffer.str();
-
-    chat->encodeString16(StringUtils::utf8ToWide(msg));
-    peer->sendPacket(chat, true/*reliable*/);
-
-    file.close(); // close the file
-    delete chat;
-    return;
-    }
-
-    else if (argv[0] == "allstats")
+else if (argv[0] == "stats" || argv[0] == "allstats")
     {
     // Stats of every player of the last match, written by SoccerWorld
     std::ifstream file("last_match_players.txt");
@@ -6964,6 +6935,8 @@ delete chat;
 
 }
 
+
+// ----------------------------------------------------------------------------
 void ServerLobby::send_private_message(const std::string &msg, std::shared_ptr<STKPeer> target_peer)
 {
     NetworkString* chat = getNetworkString(m_type);

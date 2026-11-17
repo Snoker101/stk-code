@@ -1966,7 +1966,8 @@ void SoccerWorld::enterRaceOverState()
                 "\U0001f7e5 " : "\U0001f7e6 ")
                 << ks.m_name << ": " << ks.total_pts << " pts (goals "
                 << ks.scoring_pts << ", shots " << ks.attacking_pts
-                << ", saves " << ks.defending_pts + ks.inddefending_pts
+                << ", saves " << ks.defending_pts
+                << ", clearances " << ks.inddefending_pts
                 << ", mistakes " << -ks.bad_play_pts << ")\n";
         }
         pfile.close();
