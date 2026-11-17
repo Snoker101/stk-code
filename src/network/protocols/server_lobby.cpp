@@ -644,14 +644,24 @@ void ServerLobby::updateTracksForMode()
     lastLeftName = "";
     m_mix_voters.clear();
 
-    // Read tips from the file
+    // Read tips from the file, every tip is sent starting with "Tip: "
+    tips.clear();
+    auto add_tip = [](const std::string& tip)
+    {
+        if (tip.empty())
+            return;
+        if (tip.rfind("Tip:", 0) == 0)
+            tips.push_back(tip);
+        else
+            tips.push_back("Tip: " + tip);
+    };
     std::ifstream file("tips.txt");
     if (file.is_open())
     {
         std::string tip;
         while (std::getline(file, tip))
         {
-            tips.push_back(tip);
+            add_tip(tip);
         }
         file.close();
     }
@@ -678,7 +688,8 @@ void ServerLobby::updateTracksForMode()
         new_file << "You can pick up your team's bowlings from the ground." << std::endl;
         new_file << "Always keep a bowling in your pocket." << std::endl;
         new_file << "Nitro works while reversing too." << std::endl;
-        new_file << "To jump, press nitro without gas near a flying ball." << std::endl;
+        new_file << "To jump, press nitro without the acceleration button near a flying ball." << std::endl;
+        new_file << "You lose some nitro when you get hit by a cake." << std::endl;
         new_file << "Powerups triple for the weaker team when it is losing by much." << std::endl;
         new_file << "Vote for your preferred kart position in the lobby." << std::endl;
         new_file.close();
@@ -688,7 +699,7 @@ void ServerLobby::updateTracksForMode()
         std::string tip;
         while (std::getline(new_file_read, tip))
         {
-            tips.push_back(tip);
+            add_tip(tip);
         }
         new_file_read.close();
     }
@@ -1205,13 +1216,14 @@ void ServerLobby::handleChat(Event* event)
             }
             return false;
         };
-        if (has_word("how") && has_word("jump") &&
+        if (has_word("how") && (has_word("jump") || has_word("fly")) &&
             text.find("not") == std::string::npos)
         {
             NetworkString* reply = getNetworkString(m_type);
             reply->setSynchronous(true);
             reply->addUInt8(LE_CHAT).encodeString16(
-                L"To jump, press nitro without gas near flying balls");
+                L"Server: To jump, press nitro without the acceleration button "
+                L"near flying balls");
             const int times = m_state.load() == RACING ? 2 : 1;
             for (int i = 0; i < times; i++)
             {
@@ -4187,13 +4199,16 @@ void ServerLobby::updatePlayerList(bool update_when_reset_server)
         // Convert the const wchar_t* to a std::string.
         std::wcsrtombs(&profile_name_for_rank[0], &profile_name_wide_cstr, buffer_size, nullptr);
 
-        // Add medal ranking
-        if(getPlayerInfoCurrentRanking(profile_name_for_rank).first == 1)
-            profile_name = StringUtils::utf32ToWide({ 0x1F947 }) + profile_name;
-        else if (getPlayerInfoCurrentRanking(profile_name_for_rank).first == 2)
-            profile_name = StringUtils::utf32ToWide({ 0x1F948 }) + profile_name;
-        else if (getPlayerInfoCurrentRanking(profile_name_for_rank).first == 3)
-            profile_name = StringUtils::utf32ToWide({ 0x1F949 }) + profile_name;
+        // Add ranking marker: medals for 1-3, outlined circled numbers
+        // (U+2463..U+2473, available in wqy-microhei) for 4-20
+        const int rank =
+            getPlayerInfoCurrentRanking(profile_name_for_rank).first;
+        if (rank >= 1 && rank <= 3)
+            profile_name = StringUtils::utf32ToWide(
+                { (char32_t)(0x1F947 + rank - 1) }) + profile_name;
+        else if (rank >= 4 && rank <= 20)
+            profile_name = StringUtils::utf32ToWide(
+                { (char32_t)(0x2460 + rank - 1) }) + profile_name;
 
          // Add a Cedar tree emoji if the player's name is "Cedar"
         if (profile_name == L"Cedar")
